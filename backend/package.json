@@ -1,0 +1,35 @@
+{
+  "name": "vrshop-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "VRShop backend: room analysis, real product search, 3D model pipeline, layout, voice.",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "smoke": "tsx scripts/smoke.ts",
+    "reset": "tsx scripts/reset.ts"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@gltf-transform/core": "^4.5.0",
+    "@gltf-transform/extensions": "^4.5.0",
+    "@gltf-transform/functions": "^4.5.0",
+    "dotenv": "^18.0.4",
+    "draco3dgltf": "^1.5.7",
+    "express": "^5.2.1",
+    "meshoptimizer": "^1.3.0",
+    "multer": "^2.4.0",
+    "sharp": "^0.35.4"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/multer": "^2.2.0",
+    "@types/node": "^26.6.3",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

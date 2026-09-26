@@ -1,0 +1,31 @@
+{
+    "name": "VRShop.Runtime",
+    "rootNamespace": "VRShop",
+    "references": [
+        "Oculus.VR",
+        "meta.xr.mrutilitykit",
+        "glTFast",
+        "Unity.TextMeshPro",
+        "UnityEngine.UI",
+        "Unity.RenderPipelines.Universal.Runtime",
+        "Unity.RenderPipelines.Core.Runtime",
+        "Unity.InputSystem"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [
+        "VRSHOP_HAS_META",
+        "VRSHOP_HAS_MRUK",
+        "VRSHOP_HAS_GLTFAST"
+    ],
+    "versionDefines": [
+        { "name": "com.meta.xr.sdk.core", "expression": "", "define": "VRSHOP_HAS_META" },
+        { "name": "com.meta.xr.mrutilitykit", "expression": "", "define": "VRSHOP_HAS_MRUK" },
+        { "name": "com.unity.cloud.gltfast", "expression": "", "define": "VRSHOP_HAS_GLTFAST" }
+    ],
+    "noEngineReferences": false
+}

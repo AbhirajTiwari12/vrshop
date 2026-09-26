@@ -1,0 +1,14 @@
+node_modules/
+backend/data/
+backend/.env
+.env
+.DS_Store
+# Unity
+unity/**/Library/
+unity/**/Temp/
+unity/**/Obj/
+unity/**/Build/
+unity/**/Builds/
+unity/**/Logs/
+unity/**/UserSettings/
+*.apk

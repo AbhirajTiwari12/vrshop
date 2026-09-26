@@ -1,0 +1,54 @@
+{
+    "name": "VRShop.Editor",
+    "rootNamespace": "VRShop.EditorTools",
+    "references": [
+        "VRShop.Runtime",
+        "Oculus.VR",
+        "Oculus.VR.Editor",
+        "meta.xr.mrutilitykit",
+        "glTFast",
+        "Unity.TextMeshPro",
+        "UnityEngine.UI",
+        "Unity.RenderPipelines.Universal.Runtime",
+        "Unity.RenderPipelines.Core.Runtime",
+        "Unity.XR.OpenXR",
+        "Unity.XR.Management",
+        "Unity.XR.Management.Editor"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "VRSHOP_HAS_META",
+        "VRSHOP_HAS_MRUK",
+        "VRSHOP_HAS_GLTFAST"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.meta.xr.sdk.core",
+            "expression": "",
+            "define": "VRSHOP_HAS_META"
+        },
+        {
+            "name": "com.meta.xr.mrutilitykit",
+            "expression": "",
+            "define": "VRSHOP_HAS_MRUK"
+        },
+        {
+            "name": "com.unity.cloud.gltfast",
+            "expression": "",
+            "define": "VRSHOP_HAS_GLTFAST"
+        },
+        {
+            "name": "com.unity.xr.openxr",
+            "expression": "",
+            "define": "VRSHOP_HAS_OPENXR"
+        }
+    ],
+    "noEngineReferences": false
+}
