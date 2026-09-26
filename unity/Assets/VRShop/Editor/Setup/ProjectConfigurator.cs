@@ -37,29 +37,7 @@ namespace VRShop.EditorTools
                     EditorUtility.DisplayDialog("VRShop", "Switched the project to Android.\n\nWhen Unity finishes recompiling, click  2. Configure project  again.", "OK");
                     return;
                 }
-                EditorUserBuildSettings.androidBuildSubtarget = MobileTextureSubtarget.ASTC;
-
-                EditorUtility.DisplayProgressBar("VRShop", "Player settings…", 0.15f);
-                ConfigurePlayer();
-                EditorUtility.DisplayProgressBar("VRShop", "Meta XR features…", 0.25f);
-                ConfigureMeta();
-                EditorUtility.DisplayProgressBar("VRShop", "URP for Quest 2…", 0.35f);
-                ConfigureUrp();
-                EditorUtility.DisplayProgressBar("VRShop", "TextMeshPro resources…", 0.45f);
-                ImportTmpEssentials();
-                EditorUtility.DisplayProgressBar("VRShop", "Materials…", 0.55f);
-                CreateRuntimeMaterials();
-                CreateGltfVariantKeepers();
-                EditorUtility.DisplayProgressBar("VRShop", "OpenXR features…", 0.65f);
-                ConfigureOpenXrFeatures();
-                AssetDatabase.SaveAssets();
-
-                EditorUtility.DisplayProgressBar("VRShop", "Meta Project Setup Tool: fixing recommended settings…", 0.8f);
-                try { await OVRProjectSetup.FixAllAsync(BuildTargetGroup.Android); }
-                catch (Exception e) { Debug.LogWarning($"[VRShop] Meta Project Setup Tool: {e.Message}. Open Meta > Tools > Project Setup Tool and click Fix All."); }
-                ConfigureOpenXrFeatures(); // again, in case the loader was only just created
-                AssetDatabase.SaveAssets();
-                Debug.Log("[VRShop] Project configured for Quest. Next: VRShop > Setup Window > 3. Build Scene.");
+                await ConfigureAllAsync();
                 EditorUtility.DisplayDialog("VRShop", "Project configured for Meta Quest.\n\nNext: 3. Build Scene.\n\n(Check Meta > Tools > Project Setup Tool shows no red items; click Fix All if it does.)", "OK");
             }
             catch (Exception e)
@@ -71,6 +49,65 @@ namespace VRShop.EditorTools
             {
                 EditorUtility.ClearProgressBar();
             }
+        }
+
+        /// <summary>
+        /// Every configuration step, with no dialogs (used by the menu and by BatchSetup on the command line).
+        /// The active build target must already be Android.
+        /// </summary>
+        public static async Task ConfigureAllAsync()
+        {
+            EditorUserBuildSettings.androidBuildSubtarget = MobileTextureSubtarget.ASTC;
+            EditorUtility.DisplayProgressBar("VRShop", "Player settings…", 0.15f);
+            ConfigurePlayer();
+            EditorUtility.DisplayProgressBar("VRShop", "XR loader…", 0.2f);
+            EnsureOpenXrLoader();
+            EditorUtility.DisplayProgressBar("VRShop", "Meta XR features…", 0.25f);
+            ConfigureMeta();
+            EditorUtility.DisplayProgressBar("VRShop", "URP for Quest 2…", 0.35f);
+            ConfigureUrp();
+            EditorUtility.DisplayProgressBar("VRShop", "TextMeshPro resources…", 0.45f);
+            ImportTmpEssentials();
+            EditorUtility.DisplayProgressBar("VRShop", "Materials…", 0.55f);
+            CreateRuntimeMaterials();
+            CreateGltfVariantKeepers();
+            EditorUtility.DisplayProgressBar("VRShop", "OpenXR features…", 0.65f);
+            ConfigureOpenXrFeatures();
+            AssetDatabase.SaveAssets();
+
+            EditorUtility.DisplayProgressBar("VRShop", "Meta Project Setup Tool: fixing recommended settings…", 0.8f);
+            try { await OVRProjectSetup.FixAllAsync(BuildTargetGroup.Android); }
+            catch (Exception e) { Debug.LogWarning($"[VRShop] Meta Project Setup Tool: {e.Message}. Open Meta > Tools > Project Setup Tool and click Fix All."); }
+            ConfigureOpenXrFeatures(); // again, in case Fix All changed the feature set
+            AssetDatabase.SaveAssets();
+            Debug.Log("[VRShop] Project configured for Quest. Next: VRShop > Setup Window > 3. Build Scene.");
+        }
+
+        /// <summary>XR Plug-in Management → Android → OpenXR (the runtime Meta XR SDK 207 runs on).</summary>
+        static void EnsureOpenXrLoader()
+        {
+            if (!EditorBuildSettings.TryGetConfigObject(UnityEngine.XR.Management.XRGeneralSettings.k_SettingsKey, out UnityEditor.XR.Management.XRGeneralSettingsPerBuildTarget perTarget) || perTarget == null)
+            {
+                EnsureDir("Assets/XR");
+                perTarget = ScriptableObject.CreateInstance<UnityEditor.XR.Management.XRGeneralSettingsPerBuildTarget>();
+                AssetDatabase.CreateAsset(perTarget, "Assets/XR/XRGeneralSettingsPerBuildTarget.asset");
+                EditorBuildSettings.AddConfigObject(UnityEngine.XR.Management.XRGeneralSettings.k_SettingsKey, perTarget, true);
+            }
+            if (!perTarget.HasSettingsForBuildTarget(BuildTargetGroup.Android)) perTarget.CreateDefaultSettingsForBuildTarget(BuildTargetGroup.Android);
+            if (!perTarget.HasManagerSettingsForBuildTarget(BuildTargetGroup.Android)) perTarget.CreateDefaultManagerSettingsForBuildTarget(BuildTargetGroup.Android);
+            var general = perTarget.SettingsForBuildTarget(BuildTargetGroup.Android);
+            general.InitManagerOnStart = true;
+            var manager = perTarget.ManagerSettingsForBuildTarget(BuildTargetGroup.Android);
+            if (!manager.activeLoaders.Any(l => l != null && l.GetType().Name == "OpenXRLoader"))
+            {
+                if (UnityEditor.XR.Management.Metadata.XRPackageMetadataStore.AssignLoader(manager, "UnityEngine.XR.OpenXR.OpenXRLoader", BuildTargetGroup.Android))
+                    Debug.Log("[VRShop] Enabled the OpenXR loader for Android.");
+                else
+                    Debug.LogError("[VRShop] Couldn't enable the OpenXR loader: Project Settings > XR Plug-in Management > Android > tick OpenXR.");
+            }
+            EditorUtility.SetDirty(general);
+            EditorUtility.SetDirty(manager);
+            EditorUtility.SetDirty(perTarget);
         }
 
         static void ConfigurePlayer()
@@ -100,6 +137,10 @@ namespace VRShop.EditorTools
             cfg.insightPassthroughSupport = OVRProjectConfig.FeatureSupport.Required;
             cfg.sceneSupport = OVRProjectConfig.FeatureSupport.Required;
             cfg.anchorSupport = OVRProjectConfig.AnchorSupport.Enabled;
+            // Meta's network security config sets cleartextTrafficPermitted=false, which silently blocks the
+            // plain-HTTP LAN backend (overriding PlayerSettings.insecureHttpOption). Use a https tunnel if you
+            // ever need to turn this back on.
+            cfg.enableNSCConfig = false;
             OVRProjectConfig.CommitProjectConfig(cfg);
         }
 

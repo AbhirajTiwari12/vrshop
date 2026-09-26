@@ -17,9 +17,9 @@ namespace VRShop.Input
     /// in Play mode on a Mac.
     ///
     /// Controls (Quest):  trigger = select / drag,  right stick = rotate,  A = catalog,  B = delete,
-    ///                    hold X = voice,  Y = passthrough / virtual room,  grip = drag too.
+    ///                    hold X = voice,  grip = drag too.  (Y is unused: the app is MR-only.)
     /// Controls (Editor): left click = trigger,  scroll = rotate,  Tab = A,  Backspace = B,  hold V = X,
-    ///                    M = Y,  WASD + arrow keys = walk / look,  Q/E = down/up.
+    ///                    WASD + arrow keys = walk / look,  Q/E = down/up.
     /// </summary>
     public class XRInput : MonoBehaviour
     {
@@ -43,7 +43,9 @@ namespace VRShop.Input
         void Start()
         {
             m_Cam = Camera.main;
-            Simulated = !XRSettings.isDeviceActive;
+            // Only the Editor simulates. On the headset the XR device can report inactive at launch (e.g. the app
+            // started while the headset was off-face), which used to lock the app into mouse/keyboard mode.
+            Simulated = Application.isEditor && !XRSettings.isDeviceActive;
             if (Simulated && m_Cam != null)
             {
                 Debug.Log("[VRShop] No XR device: simulating controllers with mouse/keyboard.");

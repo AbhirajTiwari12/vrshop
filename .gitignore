@@ -1,5 +1,6 @@
 node_modules/
 backend/data/
+backend/data-gentest/
 backend/.env
 .env
 .DS_Store
@@ -12,3 +13,11 @@ unity/**/Builds/
 unity/**/Logs/
 unity/**/UserSettings/
 *.apk
+unity/**/MemoryCaptures/
+unity/**/Recordings/
+unity/.vscode/
+unity/.idea/
+unity/*.csproj
+unity/*.sln
+unity/*.slnx
+unity/.utmp/

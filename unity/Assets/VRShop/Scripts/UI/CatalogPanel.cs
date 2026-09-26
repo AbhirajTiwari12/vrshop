@@ -28,7 +28,7 @@ namespace VRShop.UI
         TextMeshProUGUI m_Title, m_Summary, m_CartSummary, m_Stage, m_Tags, m_PageLabel, m_Hint;
         readonly List<Image> m_Swatches = new List<Image>();
         readonly List<UIButton> m_Tabs = new List<UIButton>();
-        UIButton m_TabPrev, m_TabNext, m_CartTab, m_Prev, m_Next, m_Design, m_Mode;
+        UIButton m_TabPrev, m_TabNext, m_CartTab, m_Prev, m_Next, m_Design;
         RectTransform m_Grid, m_Detail, m_CartView, m_Message;
         TextMeshProUGUI m_MessageText;
         readonly List<Card> m_Cards = new List<Card>();
@@ -78,7 +78,6 @@ namespace VRShop.UI
         {
             UIKit.PlaceInFront(transform, 0.95f, 0.12f);
             if (VRShopApp.Instance != null) VRShopApp.Instance.SessionChanged += _ => Refresh();
-            if (PassthroughController.Instance != null) PassthroughController.Instance.ModeChanged += _ => RefreshFooter();
         }
 
         void Update()
@@ -214,10 +213,9 @@ namespace VRShop.UI
             m_Prev = UIKit.Button(root, "Prev", 36, 730, 120, 60, "< Prev", 20, () => { m_Page = Mathf.Max(0, m_Page - 1); RefreshContent(); });
             m_PageLabel = UIKit.Text(root, "Page", 160, 730, 110, 60, "", 20, UIKit.Muted, TextAlignmentOptions.Center);
             m_Next = UIKit.Button(root, "Next", 274, 730, 120, 60, "Next >", 20, () => { m_Page++; RefreshContent(); });
-            m_Design = UIKit.Button(root, "Design", 470, 730, 330, 60, "Design my room", 24, () => VRShopApp.Instance.DesignMyRoom(), true);
-            m_Mode = UIKit.Button(root, "Mode", 816, 730, 220, 60, "Virtual room", 20, () => PassthroughController.Instance?.Toggle());
+            m_Design = UIKit.Button(root, "Design", 470, 730, 566, 60, "Design my room", 24, () => VRShopApp.Instance.DesignMyRoom(), true);
             UIKit.Button(root, "Hide", 1052, 730, 192, 60, "Hide  (A)", 20, Hide);
-            m_Hint = UIKit.Text(root, "Hint", 36, 794, 1208, 24, "Hold X and say what you want  •  Trigger: select / drag  •  Stick: rotate  •  B: delete  •  Y: passthrough / virtual room", 16, UIKit.Muted, TextAlignmentOptions.Center);
+            m_Hint = UIKit.Text(root, "Hint", 36, 794, 1208, 24, "Hold X and say what you want  •  Trigger: select / drag  •  Stick: rotate  •  B: delete", 16, UIKit.Muted, TextAlignmentOptions.Center);
 
             SetContent(m_Message);
         }
@@ -483,8 +481,6 @@ namespace VRShop.UI
 
         void RefreshFooter()
         {
-            var vr = PassthroughController.Instance != null && PassthroughController.Instance.Mode == ViewMode.VirtualRoom;
-            m_Mode?.SetLabel(vr ? "Passthrough" : "Virtual room");
             if (m_Design != null) m_Design.Interactable = S != null && S.categories != null && S.categories.Count > 0;
         }
     }

@@ -35,6 +35,9 @@ namespace VRShop.EditorTools
             rig.name = "OVRCameraRig";
             var manager = rig.GetComponent<OVRManager>() ?? rig.AddComponent<OVRManager>();
             manager.isInsightPassthroughEnabled = true;
+            // The rig prefab defaults to eye level (y = 0 at the eyes). Furniture, the default room and floor
+            // dragging all assume y = 0 is the real floor.
+            manager.trackingOriginType = OVRManager.TrackingOrigin.FloorLevel;
             var so = new SerializedObject(manager);
             foreach (var prop in new[] { "requestScenePermissionOnStartup", "requestRecordAudioPermissionOnStartup" })
             {

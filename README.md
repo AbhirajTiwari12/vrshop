@@ -17,8 +17,7 @@ walk around them, check they fit, let AI arrange the room, and check out with st
                                      ├─ 3D: IKEA official GLB │ image→3D (fal/Meshy/Tripo) │  occlusion by real walls/furniture
                                      │  │ procedural stand-in → normalized for Quest ────▶ ├─ drag / rotate / wall-snap,
                                      ├─ "Design my room" layout solver  ◀── room geometry ─┤  fit + doorway check
-                                     └─ voice: transcription → intent → search  ◀── mic ───┤─ hold X: "a tall plant here"
-                                                                                          └─ Y: full-color virtual room
+                                     └─ voice: transcription → intent → search  ◀── mic ───┘─ hold X: "a tall plant here"
 ```
 
 | Folder | What |
@@ -61,7 +60,7 @@ budget, tap **Design my room**. Recommendations stream in within ~20–40 s.
 
 ### 3. Quest
 
-Follow [`unity/README.md`](unity/README.md) once (create project, install packages, configure, build scene, Build & Run).
+Open `unity/` in Unity Hub (it's a complete, pre-configured project) and follow [`unity/README.md`](unity/README.md) to Build & Run.
 On the headset: do **Space Setup** (walls + furniture boxes + doors) first. Launch VRShop — it opens the latest room from the phone.
 
 **Network tip:** hackathon Wi-Fi often blocks device-to-device traffic. Use a phone hotspot for all three devices, or expose

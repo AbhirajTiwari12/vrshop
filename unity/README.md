@@ -9,18 +9,29 @@ configure the project for you. Budget ~30–45 minutes the first time (mostly pa
 - The Quest 2 in **Developer Mode** (see §5) and a USB-C data cable.
 - The VRShop backend running on a laptop that the Quest can reach (see the repo `README.md`).
 
-## 1. Create the Unity project
+## 1. Open the project
 
-1. Unity Hub → **New project** → editor **6000.3.13f1** → template **Universal 3D** (URP) → name it `VRShopQuest`.
-2. Close nothing — just copy this repo's `unity/Assets/VRShop` folder into the new project's `Assets/` folder
-   (Finder drag-and-drop is fine). Unity imports it.
-3. A dialog asks to install the VRShop packages → **Install**. (Or menu **VRShop → 1. Install Packages**.)
-   It adds Meta XR Core SDK 207, MR Utility Kit 207, OpenXR 1.18, glTFast 6.20 and Newtonsoft JSON, plus Meta's
-   package registry. Wait for the import + recompile. If Unity asks to **enable the new Input System backend /
-   restart**, click **Yes**. If a Meta "Project Setup" popup appears, you can close it (step 2 handles it).
+This `unity/` folder **is** the Unity project (packages are pinned in `Packages/manifest.json` + `packages-lock.json`,
+settings are in `ProjectSettings/`, and every asset's `.meta` is committed so scene references survive across machines).
 
-> The rest of the VRShop code only compiles once those packages exist (asmdef define constraints), so seeing
-> just the **VRShop → 1. Install Packages** menu before this step is expected.
+1. Unity Hub → **Add** → **Add project from disk** → pick this `unity/` folder → open with **6000.3.13f1**.
+2. The first open downloads Meta XR Core SDK 207, MR Utility Kit 207, OpenXR 1.18, glTFast 6.20 and Newtonsoft JSON
+   from Meta's and Unity's registries (a few minutes). The project is already configured for Quest and the scene is
+   already built, so you can go straight to §3 / §4. Steps in §2 are only needed to change the backend URL or re-apply
+   settings.
+
+Headless (terminal / CI), from the repo root:
+
+```bash
+UNITY=/Applications/Unity/Hub/Editor/6000.3.13f1/Unity.app/Contents/MacOS/Unity
+# configure for Quest + rebuild the scene with a backend URL
+$UNITY -batchmode -projectPath unity -buildTarget Android -executeMethod VRShop.EditorTools.BatchSetup.Setup -backendUrl http://192.168.1.23:8787
+# build unity/Builds/VRShop.apk, then install it
+$UNITY -batchmode -projectPath unity -buildTarget Android -executeMethod VRShop.EditorTools.BatchSetup.BuildApk
+adb install -r unity/Builds/VRShop.apk
+# end-to-end check in Play mode (backend must be running): session → room → Design my room → real GLBs → fit
+$UNITY -batchmode -projectPath unity -buildTarget Android -executeMethod VRShop.EditorTools.PlayModeSmoke.Run
+```
 
 ## 2. Configure + build the scene
 
@@ -39,9 +50,9 @@ Menu **VRShop → Setup Window**:
 
 ## 3. Try it in the Editor (no headset)
 
-Press **Play**. The Mac editor can't show passthrough, so you get the full-color *virtual room* built from MRUK's
-sample living room. Controls: mouse = right controller ray (**click** = trigger, **right-click** = grip, **scroll** =
-rotate item), **Tab** = A (catalog), **Backspace** = B (delete), hold **V** = X (voice), **M** = Y (passthrough ↔ virtual),
+Press **Play**. VRShop is mixed-reality only, but the Mac editor can't show passthrough, so in the Editor (only) a simple
+*preview room* stands in for your real one, built from MRUK's sample living room. Controls: mouse = right controller ray (**click** = trigger, **right-click** = grip, **scroll** =
+rotate item), **Tab** = A (catalog), **Backspace** = B (delete), hold **V** = X (voice),
 **WASD / arrows / Q E** = move / look. The backend must be reachable from the Mac (use `http://localhost:8787` while testing
 in the editor, then switch back to the LAN URL before building).
 
@@ -77,7 +88,6 @@ Change the backend URL later without rebuilding: set it in the window and click 
 | **A** | show / hide the catalog in front of you |
 | **B** | delete the selected item |
 | hold **X** | voice search: "a tall plant for this corner under 80 dollars" (point where it should go) |
-| **Y** | passthrough ↔ full-color virtual room |
 
 The footprint outline turns **red** when an item collides with real furniture, other items, goes past a wall or blocks a door;
 the tag also warns if it may not fit through your door for delivery.
@@ -91,15 +101,15 @@ the tag also warns if it may not fit through your door for delivery.
 | "Can't reach the VRShop server" | Backend running? Same Wi-Fi? Hackathon Wi-Fi often blocks device-to-device traffic: use a phone hotspot, or a tunnel (`cloudflared tunnel --url http://localhost:8787`) and put the https URL in the Setup Window. |
 | Black background instead of passthrough | Project Setup Tool → Fix All; OVRManager → *Insight Passthrough* enabled; OpenXR Meta features on. |
 | Room walls in the wrong place | Redo Space Setup on the Quest, then restart the app. |
-| Compile errors mentioning Meta/MRUK/glTFast types | The packages didn't finish installing: **VRShop → 1. Install Packages**, wait, check the Package Manager. |
+| Compile errors mentioning Meta/MRUK/glTFast types | The packages didn't finish installing: wait, or check Window → Package Manager (Meta's registry must be reachable). |
 
 ## Code map
 
 ```
 Scripts/Core/VRShopApp.cs            entry point: creates subsystems, backend session sync, "Design my room"
 Scripts/Api/                         REST client + JSON models (mirror backend/src/types.ts), image cache
-Scripts/Room/RoomService.cs          Space Setup via MRUK → colliders, occluders, shadow catcher, virtual room
-Scripts/Rendering/                   passthrough ↔ virtual toggle, room-matched lighting, materials
+Scripts/Room/RoomService.cs          Space Setup via MRUK → colliders, occluders, shadow catcher, Editor preview room
+Scripts/Rendering/                   passthrough (MR), room-matched lighting, materials
 Scripts/Furniture/                   placing items, glTFast loading, ghost → model swap, layout animation
 Scripts/Interaction/                 controller laser, drag/rotate/wall-snap, fit check
 Scripts/UI/                          code-built world-space UI: catalog, item tags, toasts

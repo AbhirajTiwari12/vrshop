@@ -1,17 +1,16 @@
 using System;
 using UnityEngine;
 using UnityEngine.XR;
-using VRShop.Input;
 using VRShop.Room;
 
 namespace VRShop.Rendering
 {
-    public enum ViewMode { MixedReality, VirtualRoom }
+    public enum ViewMode { MixedReality, EditorPreview }
 
     /// <summary>
-    /// Switches between Mixed Reality (see your real room through passthrough, furniture composited in)
-    /// and Virtual Room (full-color digital version of your room built from Space Setup + the AI palette —
-    /// useful on Quest 2 whose passthrough is grayscale, and for remote shopping).
+    /// VRShop is mixed-reality only: on the headset you always see your real room through passthrough with
+    /// furniture composited in. The Mac Editor can't render passthrough, so there (and only there) the room from
+    /// MRUK's sample JSON is drawn as a simple virtual room so you can test placement without a headset.
     /// </summary>
     public class PassthroughController : MonoBehaviour
     {
@@ -19,7 +18,10 @@ namespace VRShop.Rendering
         public ViewMode Mode { get; private set; } = ViewMode.MixedReality;
         public event Action<ViewMode> ModeChanged;
 
-        public Color virtualBackground = new Color(0.82f, 0.84f, 0.87f);
+        /// <summary>True when there's no passthrough to show, so a stand-in room must be drawn.</summary>
+        public static bool NeedsEditorPreview => Application.isEditor && !XRSettings.isDeviceActive;
+
+        public Color previewBackground = new Color(0.82f, 0.84f, 0.87f);
 
         OVRPassthroughLayer m_Layer;
         Camera m_Cam;
@@ -30,20 +32,13 @@ namespace VRShop.Rendering
         {
             m_Layer = FindFirstObjectByType<OVRPassthroughLayer>();
             m_Cam = Camera.main;
-            // Passthrough can't render in the Editor without a headset: start in the virtual room there.
-            Apply(XRSettings.isDeviceActive && m_Layer != null ? ViewMode.MixedReality : ViewMode.VirtualRoom);
+            if (m_Layer == null && !NeedsEditorPreview)
+                Debug.LogError("[VRShop] No OVRPassthroughLayer in the scene: rebuild it with VRShop > 3. Build Scene.");
+            Apply(NeedsEditorPreview ? ViewMode.EditorPreview : ViewMode.MixedReality);
             if (RoomService.Instance != null) RoomService.Instance.OnReady += () => Apply(Mode);
         }
 
-        void Update()
-        {
-            var i = XRInput.Instance;
-            if (i != null && i.Down(Btn.Y)) Toggle();
-        }
-
-        public void Toggle() => Apply(Mode == ViewMode.MixedReality ? ViewMode.VirtualRoom : ViewMode.MixedReality);
-
-        public void Apply(ViewMode mode)
+        void Apply(ViewMode mode)
         {
             Mode = mode;
             var mr = mode == ViewMode.MixedReality;
@@ -58,7 +53,7 @@ namespace VRShop.Rendering
             {
                 m_Cam.clearFlags = CameraClearFlags.SolidColor;
                 // Alpha 0 lets the passthrough underlay show through everywhere we don't draw.
-                m_Cam.backgroundColor = mr ? new Color(0, 0, 0, 0) : virtualBackground;
+                m_Cam.backgroundColor = mr ? new Color(0, 0, 0, 0) : previewBackground;
             }
             RoomService.Instance?.SetVirtualRoomVisible(!mr);
             ModeChanged?.Invoke(mode);

@@ -70,7 +70,7 @@ namespace VRShop.EditorTools
             Check("glTF variant keepers created", AssetDatabase.IsValidFolder(ProjectConfigurator.KeepersDir));
             Check("Scene built", File.Exists(SceneBuilder.ScenePath));
             EditorGUILayout.HelpBox("If Meta > Tools > Project Setup Tool shows red items, click Fix All.\n" +
-                                    "Editor Play mode works without a headset: mouse = right controller (click = trigger, scroll = rotate), Tab = A, Backspace = B, hold V = voice, M = passthrough/virtual, WASD/arrows = move/look.", MessageType.None);
+                                    "Editor Play mode works without a headset (a preview room stands in for passthrough): mouse = right controller (click = trigger, scroll = rotate), Tab = A, Backspace = B, hold V = voice, WASD/arrows = move/look.", MessageType.None);
             if (!string.IsNullOrEmpty(m_Status)) EditorGUILayout.HelpBox(m_Status, MessageType.None);
             EditorGUILayout.EndScrollView();
         }
@@ -134,6 +134,13 @@ namespace VRShop.EditorTools
         static void Build(bool run)
         {
             if (!File.Exists(SceneBuilder.ScenePath)) { EditorUtility.DisplayDialog("VRShop", "Build the scene first (step 3).", "OK"); return; }
+            BuildApk(run);
+        }
+
+        /// <summary>Builds Builds/VRShop.apk (and installs + launches it on the USB-connected Quest if run).</summary>
+        public static BuildReport BuildApk(bool run)
+        {
+            if (!File.Exists(SceneBuilder.ScenePath)) { Debug.LogError("[VRShop] Build the scene first (step 3)."); return null; }
             Directory.CreateDirectory("Builds");
             var options = new BuildPlayerOptions
             {
@@ -148,6 +155,7 @@ namespace VRShop.EditorTools
                 Debug.Log($"[VRShop] Built {options.locationPathName} ({report.summary.totalSize / (1024 * 1024)} MB){(run ? " and launched on the Quest" : "")}.");
             else
                 Debug.LogError($"[VRShop] Build {report.summary.result}: {report.summary.totalErrors} errors. See Console.");
+            return report;
         }
     }
 }

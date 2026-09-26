@@ -198,7 +198,7 @@ namespace VRShop.Room
             BuildMixedRealityHelpers();
             BuildVirtualRoom(null);
             Ready = true;
-            Debug.Log($"[VRShop] Room ready ({(FromDevice ? "Space Setup" : "default")}): {Walls.Count} walls, {Objects.Count} objects, floor y={FloorY:F2}");
+            Debug.Log($"[VRShop] Room ready ({(FromDevice ? "Space Setup" : "default")}): {Walls.Count} walls, {Objects.Count} objects, floor y={FloorY:F2}, head y={(Camera.main != null ? Camera.main.transform.position.y : float.NaN):F2}");
             OnReady?.Invoke();
         }
 
@@ -327,9 +327,28 @@ namespace VRShop.Room
                 Destroy(q.GetComponent<Collider>());
                 q.name = $"Occluder_{o.label}";
                 q.transform.SetParent(root, false);
-                q.transform.SetPositionAndRotation(o.center, Quaternion.Euler(0, o.yawDeg, 0));
-                q.transform.localScale = o.size * 0.98f;
+                // Tables and desks are open underneath: occlude only the top slab so a virtual rug (or a chair tucked
+                // under) still shows between the legs. Couches, beds and storage are solid to the floor.
+                var top = o.center.y + o.size.y / 2;
+                var slab = o.label.Contains("TABLE") || o.label.Contains("DESK") ? Mathf.Min(0.05f, o.size.y) : o.size.y;
+                q.transform.SetPositionAndRotation(new Vector3(o.center.x, top - slab / 2, o.center.z), Quaternion.Euler(0, o.yawDeg, 0));
+                q.transform.localScale = new Vector3(o.size.x * 0.98f, slab * 0.98f, o.size.z * 0.98f);
                 SetOccluder(q);
+
+                // Solid furniture standing on the floor also gets a low "skirt" a few cm wider than its box: it hides
+                // only floor-level virtual items (rugs), so a rug stays under the couch even when the hand-drawn
+                // Space Setup box is slightly off, without clipping a virtual chair placed beside it.
+                var onFloor = o.center.y - o.size.y / 2 < FloorY + 0.1f;
+                if (onFloor && slab >= o.size.y)
+                {
+                    var skirt = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                    Destroy(skirt.GetComponent<Collider>());
+                    skirt.name = $"FloorSkirt_{o.label}";
+                    skirt.transform.SetParent(root, false);
+                    skirt.transform.SetPositionAndRotation(new Vector3(o.center.x, FloorY + 0.015f, o.center.z), Quaternion.Euler(0, o.yawDeg, 0));
+                    skirt.transform.localScale = new Vector3(o.size.x + 0.08f, 0.03f, o.size.z + 0.08f);
+                    SetOccluder(skirt);
+                }
             }
         }
 
@@ -352,10 +371,12 @@ namespace VRShop.Room
             return m;
         }
 
+        /// <summary>Editor-only stand-in for passthrough (see PassthroughController); never built on the headset.</summary>
         public void BuildVirtualRoom(RoomAnalysis analysis)
         {
             // Remember the AI palette so a later room rebuild (Space Setup arriving) keeps the colors.
             if (analysis != null) m_Analysis = analysis;
+            if (!PassthroughController.NeedsEditorPreview) return;
             analysis = m_Analysis;
             foreach (var old in m_VrMats) if (old != null) Destroy(old);
             m_VrMats.Clear();
@@ -429,7 +450,7 @@ namespace VRShop.Room
 
         bool m_VrActive;
 
-        /// <summary>true = virtual room (VR), false = passthrough helpers (MR).</summary>
+        /// <summary>true = Editor preview room, false = passthrough helpers (MR).</summary>
         public void SetVirtualRoomVisible(bool vr)
         {
             m_VrActive = vr;

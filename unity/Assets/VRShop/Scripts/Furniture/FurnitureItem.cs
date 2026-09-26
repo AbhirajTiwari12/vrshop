@@ -19,6 +19,8 @@ namespace VRShop.Furniture
         public Product Product { get; private set; }
         public Dims Dims { get; private set; }
         public bool IsWallMounted { get; private set; }
+        /// <summary>Flat floor coverings (rugs) layer under everything, real and virtual.</summary>
+        public bool IsFloorLayer => Product != null && Product.category == "rug";
         public bool ModelLoaded { get; private set; }
         public FitState Fit { get; private set; } = FitState.Ok;
         public string FitMessage { get; private set; } = "";
@@ -28,6 +30,7 @@ namespace VRShop.Furniture
         GameObject m_Ghost;
         GameObject m_Model;
         GameObject m_Blob;
+        float m_ContactHeight;
         LineRenderer m_Footprint;
         Material m_FootprintMat;
         BoxCollider m_Collider;
@@ -84,7 +87,7 @@ namespace VRShop.Furniture
             r.sharedMaterial = m;
             r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             r.receiveShadows = false;
-            m_Blob.SetActive(!IsWallMounted);
+            m_Blob.SetActive(!IsWallMounted && !IsFloorLayer); // a rug's own halo looks wrong
         }
 
         void BuildFootprint()
@@ -113,7 +116,7 @@ namespace VRShop.Furniture
             m_Collider.size = new Vector3(Mathf.Max(size.x, 0.05f), Mathf.Max(size.y, 0.03f), Mathf.Max(size.z, 0.05f));
             m_Collider.center = new Vector3(0, m_Collider.size.y / 2, 0);
             m_Blob.transform.localScale = new Vector3(size.x * 1.25f + 0.1f, size.z * 1.25f + 0.1f, 1);
-            m_Blob.transform.localPosition = new Vector3(0, 0.004f, 0);
+            m_Blob.transform.localPosition = new Vector3(0, m_ContactHeight + 0.004f, 0);
             float hw = size.x / 2 + 0.02f, hd = size.z / 2 + 0.02f;
             // Footprint drawn in the rotated (XY) plane of its GameObject: local (x, y) -> world (x, z)
             m_Footprint.SetPositions(new[] { new Vector3(-hw, -hd, -0.006f), new Vector3(hw, -hd, -0.006f), new Vector3(hw, hd, -0.006f), new Vector3(-hw, hd, -0.006f) });
@@ -131,6 +134,14 @@ namespace VRShop.Furniture
             if (note == m_Note) return;
             m_Note = note;
             RefreshTag();
+        }
+
+        /// <summary>Lifts the contact shadow onto a virtual rug this item stands on (0 = the floor).</summary>
+        public void SetContactHeight(float height)
+        {
+            if (Mathf.Approximately(height, m_ContactHeight)) return;
+            m_ContactHeight = height;
+            m_Blob.transform.localPosition = new Vector3(0, height + 0.004f, 0);
         }
 
         public IEnumerator SwapInModel(GameObject model)

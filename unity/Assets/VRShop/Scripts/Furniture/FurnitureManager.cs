@@ -33,10 +33,32 @@ namespace VRShop.Furniture
 
         void Update()
         {
+            if (Time.frameCount % 6 == 0) UpdateFloorLayering();
             if (m_SyncAt > 0 && Time.time > m_SyncAt)
             {
                 m_SyncAt = -1;
                 SyncPlacements();
+            }
+        }
+
+        /// <summary>
+        /// Rugs sit under everything. Depth already draws items over a rug, but their contact shadows live a few mm
+        /// above the floor, i.e. inside a ~1.5 cm rug, so lift each shadow onto the top of any rug it overlaps.
+        /// </summary>
+        void UpdateFloorLayering()
+        {
+            foreach (var item in Items)
+            {
+                if (item == null || item.IsWallMounted || item.IsFloorLayer || item.Dims == null) continue;
+                var box = Obb.Of(item.transform, item.Dims.w, item.Dims.d);
+                var top = 0f;
+                foreach (var rug in Items)
+                {
+                    if (rug == null || !rug.IsFloorLayer || rug.Dims == null) continue;
+                    if (Obb.Of(rug.transform, rug.Dims.w, rug.Dims.d).Overlaps(box, 0))
+                        top = Mathf.Max(top, Mathf.Min(rug.Dims.h, 0.05f) + rug.transform.position.y - item.transform.position.y);
+                }
+                item.SetContactHeight(Mathf.Max(0, top));
             }
         }
 

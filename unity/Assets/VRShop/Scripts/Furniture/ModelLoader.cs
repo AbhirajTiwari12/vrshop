@@ -67,12 +67,14 @@ namespace VRShop.Furniture
             foreach (var r in rs)
             {
                 if (r is ParticleSystemRenderer) continue;
-                var wb = r.bounds;
-                // transform the 8 corners of the world AABB into root space
+                // Use the renderer's own local bounds, not r.bounds: a world AABB of a rotated item mapped back into
+                // root space inflates the size (a 1.2 m sofa at 45° measures ~2 m), which broke fit checks.
+                var lb = r.localBounds;
+                var toRoot = root.worldToLocalMatrix * r.transform.localToWorldMatrix;
                 for (var i = 0; i < 8; i++)
                 {
-                    var c = new Vector3((i & 1) == 0 ? wb.min.x : wb.max.x, (i & 2) == 0 ? wb.min.y : wb.max.y, (i & 4) == 0 ? wb.min.z : wb.max.z);
-                    var lc = root.InverseTransformPoint(c);
+                    var c = new Vector3((i & 1) == 0 ? lb.min.x : lb.max.x, (i & 2) == 0 ? lb.min.y : lb.max.y, (i & 4) == 0 ? lb.min.z : lb.max.z);
+                    var lc = toRoot.MultiplyPoint3x4(c);
                     if (!has) { b = new Bounds(lc, Vector3.zero); has = true; }
                     else b.Encapsulate(lc);
                 }
