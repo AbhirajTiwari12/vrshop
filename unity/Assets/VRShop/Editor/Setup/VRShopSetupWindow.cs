@@ -65,7 +65,7 @@ namespace VRShop.EditorTools
             GUILayout.Label("Checks", EditorStyles.boldLabel);
             Check("Active build target is Android", EditorUserBuildSettings.activeBuildTarget == BuildTarget.Android);
             Check("URP asset assigned", UnityEngine.Rendering.GraphicsSettings.defaultRenderPipeline != null);
-            Check("TextMeshPro resources imported", AssetDatabase.FindAssets("t:TMP_Settings").Length > 0);
+            Check("TextMeshPro resources imported", AssetDatabase.FindAssets("t:TMP_Settings", new[] { "Assets" }).Length > 0);
             Check("Runtime materials created", AssetDatabase.IsValidFolder(ProjectConfigurator.MaterialsDir));
             Check("glTF variant keepers created", AssetDatabase.IsValidFolder(ProjectConfigurator.KeepersDir));
             Check("Scene built", File.Exists(SceneBuilder.ScenePath));

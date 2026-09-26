@@ -43,6 +43,7 @@ namespace VRShop.Api
             {
                 Debug.LogWarning($"[VRShop] image failed {url}: {req.error}");
                 s_Tasks.Remove(url);
+                s_Lru.Remove(url);
                 return null;
             }
             var tex = DownloadHandlerTexture.GetContent(req);

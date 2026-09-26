@@ -18,13 +18,4 @@ namespace VRShop.Interaction
         void OnPress(PointerEvent e);
         void OnRelease(PointerEvent e, bool clicked);
     }
-
-    public enum SurfaceKind { Floor, Wall, Object }
-
-    /// <summary>Marks colliders built from the room model (Space Setup) so the laser knows what it hit.</summary>
-    public class RoomSurface : MonoBehaviour
-    {
-        public SurfaceKind kind;
-        public string label;
-    }
 }

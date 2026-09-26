@@ -45,6 +45,7 @@ namespace VRShop.UI
         int m_TabPage, m_Page;
         Product m_DetailProduct;
         bool m_Visible = true;
+        bool m_PlacedWithSession;
 
         Session S => VRShopApp.Instance != null ? VRShopApp.Instance.Session : null;
         ApiClient Api => VRShopApp.Instance.Api;
@@ -122,7 +123,8 @@ namespace VRShop.UI
             m_Canvas.transform.SetParent(transform, false);
             m_Group = m_Canvas.gameObject.AddComponent<CanvasGroup>();
             var root = m_Canvas.transform;
-            UIKit.Panel(root, "Background", 0, 0, W, H, UIKit.Bg);
+            var bg = UIKit.Panel(root, "Background", 0, 0, W, H, UIKit.Bg);
+            PanelBlocker.Add(bg.gameObject, W, H); // clicks on empty panel space must not hit the room behind
 
             // Header
             m_Title = UIKit.Text(root, "Title", 36, 26, 820, 52, "VRShop", 40, UIKit.TextColor, TextAlignmentOptions.TopLeft, FontStyles.Bold);
@@ -244,6 +246,12 @@ namespace VRShop.UI
         {
             var s = S;
             if (s == null) return;
+            if (!m_PlacedWithSession)
+            {
+                // Head tracking may not have been valid in Start(); place again once we have content.
+                m_PlacedWithSession = true;
+                if (m_Visible) UIKit.PlaceInFront(transform, 0.95f, 0.12f);
+            }
             var room = s.room;
             m_Title.text = room != null ? $"Your {room.roomType}" : "Your room";
             m_Summary.text = room?.summary ?? (string.IsNullOrEmpty(s.prompt) ? "" : s.prompt);

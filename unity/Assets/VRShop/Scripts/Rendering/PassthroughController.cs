@@ -1,6 +1,7 @@
 using System;
 using UnityEngine;
 using UnityEngine.XR;
+using VRShop.Input;
 using VRShop.Room;
 
 namespace VRShop.Rendering
@@ -32,6 +33,12 @@ namespace VRShop.Rendering
             // Passthrough can't render in the Editor without a headset: start in the virtual room there.
             Apply(XRSettings.isDeviceActive && m_Layer != null ? ViewMode.MixedReality : ViewMode.VirtualRoom);
             if (RoomService.Instance != null) RoomService.Instance.OnReady += () => Apply(Mode);
+        }
+
+        void Update()
+        {
+            var i = XRInput.Instance;
+            if (i != null && i.Down(Btn.Y)) Toggle();
         }
 
         public void Toggle() => Apply(Mode == ViewMode.MixedReality ? ViewMode.VirtualRoom : ViewMode.MixedReality);

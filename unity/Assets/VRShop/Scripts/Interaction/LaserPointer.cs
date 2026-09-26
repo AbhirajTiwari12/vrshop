@@ -61,6 +61,9 @@ namespace VRShop.Interaction
 
         void Update()
         {
+            // Interface refs don't see Unity's destroy; drop targets whose object was deleted.
+            if (Hovered is Object ho && ho == null) Hovered = null;
+            if (Pressed is Object po && po == null) Pressed = null;
             var input = XRInput.Instance;
             if (input == null || !input.IsTracked(hand))
             {

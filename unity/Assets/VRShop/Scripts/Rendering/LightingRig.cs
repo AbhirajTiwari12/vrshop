@@ -12,6 +12,7 @@ namespace VRShop.Rendering
     {
         public static LightingRig Instance { get; private set; }
         Light m_Sun;
+        Material m_Sky;
 
         void Awake()
         {
@@ -57,7 +58,9 @@ namespace VRShop.Rendering
             RenderSettings.ambientGroundColor = VRShopMaterials.Hex(floorHex, new Color(0.45f, 0.4f, 0.36f)) * amb * 0.5f;
 
             // Reflections for glossy wood/metal come from a procedural sky tinted like the room.
-            var sky = VRShopMaterials.Skybox;
+            // Work on a copy: editing the Resources asset in Play mode would rewrite it on disk.
+            if (m_Sky == null && VRShopMaterials.Skybox != null) m_Sky = new Material(VRShopMaterials.Skybox);
+            var sky = m_Sky;
             if (sky != null && sky.shader.name == "Skybox/Procedural")
             {
                 sky.SetColor("_SkyTint", Color.Lerp(new Color(0.6f, 0.6f, 0.62f), tint, 0.4f));

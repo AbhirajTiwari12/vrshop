@@ -54,7 +54,7 @@ namespace VRShop.Voice
             if (m_Recording) return;
             if (Microphone.devices.Length == 0) { Toast.Show("No microphone found"); return; }
             m_Device = Microphone.devices[0];
-            m_Clip = Microphone.Start(m_Device, false, MaxSeconds, SampleRate);
+            m_Clip = Microphone.Start(m_Device, false, MaxSeconds + 1, SampleRate);
             m_Recording = true;
             m_Started = Time.time;
             m_PointedAt = null;
@@ -66,14 +66,16 @@ namespace VRShop.Voice
         {
             if (!m_Recording) return;
             m_Recording = false;
-            var pos = Microphone.GetPosition(m_Device);
+            if (m_Clip == null) return;
+            // A full non-looping clip stops recording and GetPosition returns 0: use the whole clip then.
+            var pos = Microphone.IsRecording(m_Device) ? Microphone.GetPosition(m_Device) : m_Clip.samples;
             Microphone.End(m_Device);
-            var seconds = pos / (float)SampleRate;
-            if (m_Clip == null || seconds < 0.4f) { Toast.Show("Hold X while you speak"); return; }
+            var seconds = pos / (float)m_Clip.frequency;
+            if (seconds < 0.4f) { Toast.Show("Hold X while you speak"); return; }
 
             var samples = new float[pos * m_Clip.channels];
             m_Clip.GetData(samples, 0);
-            var wav = WavEncoder.Encode(samples, m_Clip.channels, SampleRate);
+            var wav = WavEncoder.Encode(samples, m_Clip.channels, m_Clip.frequency);
             Toast.Sticky("Searching real stores…");
 
             var app = VRShopApp.Instance;

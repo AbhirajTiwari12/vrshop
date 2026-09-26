@@ -62,6 +62,7 @@ namespace VRShop.Interaction
 
         public void EndDrag(FurnitureItem item, PointerEvent e, bool clicked)
         {
+            if (item == null) { m_Drag = null; IsDragging = false; return; }
             if (m_Drag != item) return;
             if (IsDragging && !item.IsWallMounted) SnapToWall(item);
             m_Drag = null;
@@ -74,6 +75,7 @@ namespace VRShop.Interaction
         {
             var input = XRInput.Instance;
             if (input == null) return;
+            if (m_Drag == null) IsDragging = false;
 
             if (m_Drag != null)
             {

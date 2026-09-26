@@ -30,7 +30,13 @@ namespace VRShop.EditorTools
             {
                 EditorUtility.DisplayProgressBar("VRShop", "Switching to Android…", 0.05f);
                 if (EditorUserBuildSettings.activeBuildTarget != BuildTarget.Android)
+                {
+                    // Switching platform recompiles and reloads scripts, which would cut this async method short.
                     EditorUserBuildSettings.SwitchActiveBuildTarget(BuildTargetGroup.Android, BuildTarget.Android);
+                    EditorUtility.ClearProgressBar();
+                    EditorUtility.DisplayDialog("VRShop", "Switched the project to Android.\n\nWhen Unity finishes recompiling, click  2. Configure project  again.", "OK");
+                    return;
+                }
                 EditorUserBuildSettings.androidBuildSubtarget = MobileTextureSubtarget.ASTC;
 
                 EditorUtility.DisplayProgressBar("VRShop", "Player settings…", 0.15f);
@@ -139,7 +145,7 @@ namespace VRShop.EditorTools
 
         static void ImportTmpEssentials()
         {
-            if (AssetDatabase.FindAssets("t:TMP_Settings").Length > 0) return;
+            if (AssetDatabase.FindAssets("t:TMP_Settings", new[] { "Assets" }).Length > 0) return;
             foreach (var pkg in new[] { "Packages/com.unity.ugui/Package Resources/TMP Essential Resources.unitypackage", "Packages/com.unity.textmeshpro/Package Resources/TMP Essential Resources.unitypackage" })
             {
                 var full = Path.GetFullPath(pkg);

@@ -343,17 +343,27 @@ namespace VRShop.Room
 
         /// <summary>Full-color virtual version of the room for VR mode: floor + walls painted from the room analysis.</summary>
         RoomAnalysis m_Analysis;
+        readonly List<Material> m_VrMats = new List<Material>();
+
+        Material VrMat(Color c)
+        {
+            var m = VRShopMaterials.Instance(VRShopMaterials.Lit, c);
+            m_VrMats.Add(m);
+            return m;
+        }
 
         public void BuildVirtualRoom(RoomAnalysis analysis)
         {
             // Remember the AI palette so a later room rebuild (Space Setup arriving) keeps the colors.
             if (analysis != null) m_Analysis = analysis;
             analysis = m_Analysis;
+            foreach (var old in m_VrMats) if (old != null) Destroy(old);
+            m_VrMats.Clear();
             var root = Group(ref m_VrRoot, "VirtualRoom");
             var wallColor = VRShopMaterials.Hex(analysis?.walls?.colorHex, new Color(0.93f, 0.92f, 0.9f));
             var floorColor = VRShopMaterials.Hex(analysis?.floor?.colorHex, new Color(0.62f, 0.48f, 0.36f));
-            m_WallMat = VRShopMaterials.Instance(VRShopMaterials.Lit, wallColor);
-            m_FloorMat = VRShopMaterials.Instance(VRShopMaterials.Lit, floorColor);
+            m_WallMat = VrMat(wallColor);
+            m_FloorMat = VrMat(floorColor);
             if (m_FloorMat.HasProperty("_Smoothness")) m_FloorMat.SetFloat("_Smoothness", 0.35f);
             if (m_WallMat.HasProperty("_Smoothness")) m_WallMat.SetFloat("_Smoothness", 0.1f);
 
@@ -401,7 +411,7 @@ namespace VRShop.Room
                 bb.transform.SetParent(root, false);
                 bb.transform.SetPositionAndRotation(new Vector3(w.center.x, FloorY + 0.05f, w.center.z) + w.normal * 0.005f, Quaternion.LookRotation(w.normal, Vector3.up));
                 bb.transform.localScale = new Vector3(w.width, 0.1f, 0.02f);
-                bb.GetComponent<MeshRenderer>().sharedMaterial = VRShopMaterials.Instance(VRShopMaterials.Lit, Color.Lerp(wallColor, Color.white, 0.5f));
+                bb.GetComponent<MeshRenderer>().sharedMaterial = VrMat(Color.Lerp(wallColor, Color.white, 0.5f));
             }
             // Real furniture from Space Setup shown as soft gray blocks so the user keeps their bearings.
             foreach (var o in Objects.Where(o => !o.isOpening))
@@ -412,7 +422,7 @@ namespace VRShop.Room
                 q.transform.SetParent(root, false);
                 q.transform.SetPositionAndRotation(o.center, Quaternion.Euler(0, o.yawDeg, 0));
                 q.transform.localScale = o.size;
-                q.GetComponent<MeshRenderer>().sharedMaterial = VRShopMaterials.Instance(VRShopMaterials.Lit, new Color(0.7f, 0.7f, 0.72f));
+                q.GetComponent<MeshRenderer>().sharedMaterial = VrMat(new Color(0.7f, 0.7f, 0.72f));
             }
             root.gameObject.SetActive(m_VrActive);
         }
