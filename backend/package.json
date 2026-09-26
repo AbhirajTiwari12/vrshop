@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "smoke": "tsx scripts/smoke.ts",
     "reset": "tsx scripts/reset.ts",
-    "gen-test": "tsx scripts/gen-test.ts"
+    "gen-test": "tsx scripts/gen-test.ts",
+    "catalog:pull": "tsx scripts/pull-catalog.ts"
   },
   "engines": {
     "node": ">=20"

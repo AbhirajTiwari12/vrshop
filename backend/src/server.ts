@@ -5,13 +5,16 @@ import multer from 'multer';
 import sharp from 'sharp';
 import { baseUrl, capabilities, config, PUBLIC_DIR } from './config.js';
 import { dirs, getProduct, getSession, hash, listSessions, saveSession, updateProduct } from './store.js';
-import { createSession, expandSession, sessionSearch } from './session.js';
+import { createSession, expandSession, sessionAsk, sessionSearch, setBrowse, setCartQty } from './session.js';
+import { inventoryStats } from './inventory/inventory.js';
+import { pullCatalog, pullStatus, planShoppingQueries, type PullTier } from './inventory/pull.js';
+import { liveSearchBudgetLeft, shoppingCallsThisMonth } from './inventory/usage.js';
+import { COLORS, MATERIALS, STYLES } from './inventory/attributes.js';
+import { CATEGORIES } from './catalog.js';
 import { ensureModel, modelFile } from './models/pipeline.js';
 import { solveLayout, defaultGeometry, type LayoutItem } from './layout.js';
 import { categoryDef } from './catalog.js';
 import { transcribe, hasOpenAI } from './ai/openai.js';
-import { voiceIntent } from './ai/designer.js';
-import { immersiveDetails } from './search/serp.js';
 import { BROWSER_UA, fetchBuffer } from './util/http.js';
 import { log, errMsg } from './util/log.js';
 import type { Placement, RoomGeometry } from './types.js';
@@ -97,22 +100,45 @@ app.post('/api/sessions/:id/search', async (req, res) => {
   res.json({ intent, result, session: expandSession(getSession(String(req.params.id))!) });
 });
 
+// Voice: transcribe, then one assistant turn (filter the catalog, answer price questions, add to cart, ...).
 app.post('/api/sessions/:id/voice', audioUpload.single('audio'), async (req, res) => {
   need(getSession(String(req.params.id)), 'Session');
   const file = req.file;
   let transcript = String(req.body?.text ?? '').trim();
   if (!transcript) {
     if (!file) return void res.status(400).json({ error: 'audio file (field "audio") or text required' });
-    if (!hasOpenAI()) return void res.status(400).json({ error: 'Voice needs OPENAI_API_KEY on the server' });
+    if (!hasOpenAI()) return void res.status(400).json({ error: 'Voice needs OPENAI_API_KEY on the server (typing still works)' });
     transcript = await transcribe(file.buffer, file.originalname || 'speech.wav');
   }
   if (!transcript) return void res.json({ transcript: '', reply: "Sorry, I didn't catch that." });
-  const s = getSession(String(req.params.id))!;
-  const intent = await voiceIntent(transcript, s.room);
-  const { result } = await sessionSearch(String(req.params.id), transcript, intent, 'voice');
-  const cur = getSession(String(req.params.id))!;
-  saveSession({ ...cur, voice: [...cur.voice, { at: Date.now(), transcript, query: intent.query }].slice(-20) });
-  res.json({ transcript, reply: intent.reply, atPointer: intent.atPointer, result, session: expandSession(getSession(String(req.params.id))!) });
+  const focus = String(req.body?.focusProductId ?? '') || undefined;
+  const r = await sessionAsk(String(req.params.id), transcript, { via: 'voice', focusProductId: focus });
+  res.json({ ...r, session: expandSession(getSession(String(req.params.id))!) });
+});
+
+// Typed version of the same conversation.
+app.post('/api/sessions/:id/ask', async (req, res) => {
+  need(getSession(String(req.params.id)), 'Session');
+  const text = String(req.body?.text ?? '').trim().slice(0, 500);
+  if (!text) return void res.status(400).json({ error: 'text required' });
+  const focus = String(req.body?.focusProductId ?? '') || undefined;
+  const r = await sessionAsk(String(req.params.id), text, { via: 'text', focusProductId: focus });
+  res.json({ ...r, session: expandSession(getSession(String(req.params.id))!) });
+});
+
+// Manual filters (chips, sliders). Never triggers a paid search by itself...
+app.put('/api/sessions/:id/browse', async (req, res) => {
+  need(getSession(String(req.params.id)), 'Session');
+  await setBrowse(String(req.params.id), req.body?.filters ?? {}, { live: false });
+  res.json(expandSession(getSession(String(req.params.id))!));
+});
+
+// ...only this explicit "Search stores for more" does (IKEA free + one Google Shopping call, cached, monthly cap).
+app.post('/api/sessions/:id/browse/more', async (req, res) => {
+  const s = need(getSession(String(req.params.id)), 'Session');
+  const before = s.browse?.total ?? 0;
+  const b = await setBrowse(s.id, req.body?.filters ?? s.browse?.filters ?? {}, { live: true });
+  res.json({ added: b.total - before, liveSearched: b.liveSearched ?? null, session: expandSession(getSession(s.id)!) });
 });
 
 app.post('/api/sessions/:id/geometry', (req, res) => {
@@ -150,24 +176,27 @@ app.put('/api/sessions/:id/placements', (req, res) => {
 });
 
 app.post('/api/sessions/:id/cart', (req, res) => {
-  const s = need(getSession(String(req.params.id)), 'Session');
-  const productId = String(req.body?.productId ?? '');
-  const p = need(getProduct(productId), 'Product');
-  const qty = Math.max(0, Math.min(20, Number(req.body?.qty ?? 1)));
-  const existing = s.cart.find((c) => c.productId === productId);
-  const cart = qty === 0
-    ? s.cart.filter((c) => c.productId !== productId)
-    : existing
-      ? s.cart.map((c) => (c.productId === productId ? { ...c, qty } : c))
-      : [...s.cart, { productId, qty, addedAt: Date.now() }];
-  saveSession({ ...s, cart });
-  // Resolve the direct store link in the background (Google Shopping links point to Google first).
-  if (qty > 0 && !p.storeLinkResolved && p.serpImmersiveToken) {
-    void immersiveDetails(p.serpImmersiveToken).then((d) => {
-      if (d?.storeUrl) updateProduct(p.id, { productUrl: d.storeUrl, storeLinkResolved: true, store: d.store ?? p.store });
-    });
-  }
-  res.json(expandSession(getSession(s.id)!));
+  const s = setCartQty(String(req.params.id), String(req.body?.productId ?? ''), Number(req.body?.qty ?? 1));
+  res.json(expandSession(s));
+});
+
+// ---------------------------------------------------------------------------- catalog (bulk-pulled listings)
+app.get('/api/catalog', (_req, res) => {
+  res.json({
+    ...inventoryStats(),
+    pull: pullStatus,
+    shopping: { provider: config.shopping.provider, callsThisMonth: shoppingCallsThisMonth(), monthlyLimit: config.shopping.monthlyLiveLimit, liveLeft: liveSearchBudgetLeft(), liveMode: config.shopping.liveMode },
+    vocab: { categories: CATEGORIES.map((c) => ({ key: c.key, label: c.label })), colors: COLORS, materials: MATERIALS, styles: STYLES },
+  });
+});
+
+// Start a bulk pull in the background (the CLI `npm run catalog:pull` does the same with a cost prompt).
+app.post('/api/catalog/pull', (req, res) => {
+  if (pullStatus.running) return void res.status(409).json({ error: 'A pull is already running', pull: pullStatus });
+  const shopping: PullTier = ['none', 'light', 'full'].includes(req.body?.shopping) ? req.body.shopping : 'light';
+  const categories: string[] | undefined = Array.isArray(req.body?.categories) ? req.body.categories.map(String) : undefined;
+  void pullCatalog({ shopping, categories, force: !!req.body?.force }).catch((e) => log.error('catalog', errMsg(e)));
+  res.json({ started: true, plannedShoppingCalls: planShoppingQueries({ shopping, categories }).length, pull: pullStatus });
 });
 
 // ---------------------------------------------------------------------------- products & models
@@ -224,5 +253,5 @@ app.listen(config.port, '0.0.0.0', () => {
   const caps = capabilities();
   console.log(`\n  VRShop backend  →  ${baseUrl()}   (local: http://localhost:${config.port})`);
   console.log(`  phone app       →  ${baseUrl()}/`);
-  console.log(`  AI: ${caps.openai ? `OpenAI (${config.openai.visionModel} / ${config.openai.model})` : 'heuristic (set OPENAI_API_KEY)'}  |  shopping: IKEA${caps.serpapi ? ' + Google Shopping' : ' only (set SERPAPI_KEY)'}  |  image→3D: ${caps.generator}\n`);
+  console.log(`  AI: ${caps.openai ? `OpenAI (${config.openai.visionModel} / ${config.openai.model})` : 'heuristic (set OPENAI_API_KEY)'}  |  shopping: IKEA${caps.serpapi ? ` + Google Shopping (${caps.shopping})` : ' only (set SERPER_API_KEY or SERPAPI_KEY)'}  |  image→3D: ${caps.generator}\n`);
 });

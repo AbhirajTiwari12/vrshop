@@ -13,9 +13,11 @@ using UnityEngine.Android;
 namespace VRShop.Voice
 {
     /// <summary>
-    /// Hold X, say what you want ("a tall plant for this corner under 80 dollars"), release.
-    /// Audio goes to the backend (OpenAI transcription + intent), which searches real stores and adds a new
-    /// row to the catalog. If you pointed at the floor while speaking, the next item you place goes there.
+    /// Hold X, talk, release. It's a conversation with the shopping assistant over the whole pulled catalog:
+    /// "black leather sofa under 1500", "anything cheaper?", "what's the price range?", "tell me about the second one",
+    /// "add it to my cart", "put it here". The backend transcribes, updates the Browse filters (searching live stores
+    /// only if the catalog has too few matches), answers with real numbers and may act (open / place / cart).
+    /// If you pointed at the floor while speaking, the next item you place goes there.
     /// </summary>
     public class VoiceCommand : MonoBehaviour
     {
@@ -76,19 +78,36 @@ namespace VRShop.Voice
             var samples = new float[pos * m_Clip.channels];
             m_Clip.GetData(samples, 0);
             var wav = WavEncoder.Encode(samples, m_Clip.channels, m_Clip.frequency);
-            Toast.Sticky("Searching real stores…");
+            Toast.Sticky("Thinking…");
 
             var app = VRShopApp.Instance;
             if (app?.Session == null) { Toast.Show("Not connected yet"); return; }
             try
             {
-                var res = await app.Api.Voice(app.Session.id, wav);
+                // "How much is this one?" refers to the product open in the catalog's detail view.
+                var res = await app.Api.Voice(app.Session.id, wav, CatalogPanel.Instance?.FocusedProductId);
                 if (!string.IsNullOrEmpty(res.error)) { Toast.Show(res.error, 4); return; }
                 if (string.IsNullOrEmpty(res.transcript)) { Toast.Show("Sorry, I didn't catch that", 3); return; }
-                Toast.Show($"\"{res.transcript}\"\n<size=24>{res.reply}</size>", 5);
+                Toast.Show($"<size=24><color=#A9B0BC>\"{res.transcript}\"</color></size>\n{res.reply}", 7);
                 if (res.session != null) app.SetSession(res.session);
                 if (res.atPointer && m_PointedAt.HasValue && FurnitureManager.Instance != null) FurnitureManager.Instance.PendingPoint = m_PointedAt;
-                if (res.result != null) CatalogPanel.Instance?.Focus(res.result.category);
+                var target = string.IsNullOrEmpty(res.productId) ? null : app.Session?.GetProduct(res.productId);
+                switch (res.action)
+                {
+                    case "place" when target != null:
+                        FurnitureManager.Instance.Place(target);
+                        CatalogPanel.Instance?.Hide();
+                        break;
+                    case "open" when target != null:
+                        CatalogPanel.Instance?.OpenProduct(target.id);
+                        break;
+                    case "add_to_cart":
+                    case "remove_from_cart":
+                        break; // done on the server; the reply says so and the cart count updates
+                    default:
+                        if (res.browse != null) CatalogPanel.Instance?.ShowBrowse();
+                        break;
+                }
             }
             catch (Exception e)
             {

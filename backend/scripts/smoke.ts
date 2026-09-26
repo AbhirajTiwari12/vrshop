@@ -15,6 +15,13 @@ for (let i = 0; i < 60 && s.status !== 'ready' && s.status !== 'error'; i++) { a
 console.log(`\nstatus ${s.status}, ${s.categories.length} categories`);
 for (const c of s.categories) console.log(`  ${c.label.padEnd(16)} ${c.productIds.length} products  e.g. ${s.products[c.productIds[0]]?.title}`);
 
+const cat = await j('/api/catalog');
+console.log(`catalog: ${cat.total} products from ${cat.stores} stores${cat.total ? '' : '  (run `npm run catalog:pull` first)'}; shopping ${cat.shopping.provider}, ${cat.shopping.callsThisMonth}/${cat.shopping.monthlyLimit} calls this month`);
+for (const text of ['black leather sofa under 1500', 'anything cheaper?', 'what is the cheapest one']) {
+  const a = await j(`/api/sessions/${s.id}/ask`, { method: 'POST', body: JSON.stringify({ text }) });
+  console.log(`  ask "${text}" -> ${a.browse?.total ?? 0} matches: ${a.reply}`);
+}
+
 const picks = s.categories.map((c: any) => c.productIds[0]).filter(Boolean).slice(0, 5);
 for (const id of picks) await j(`/api/products/${id}/model`, { method: 'POST', body: JSON.stringify({ generate: false }) });
 for (let i = 0; i < 30; i++) {

@@ -50,9 +50,39 @@ true-scale 3D models. AI picks what fits your style, space and budget, and can a
 - **IKEA** (free, no key): search API with prices, images and ratings, plus **official true-scale GLBs** for about 80% of
   items (bounding boxes within about 2% of listed dimensions). The GLBs must be fetched server-side because the CDN rejects
   third-party browser origins.
-- **Google Shopping via SerpAPI**: covers Amazon, Wayfair, Target, Walmart and others. `google_shopping` gives price,
-  thumbnail and store. `google_immersive_product` (1 extra search) resolves the direct store link, extra images and
-  sometimes dimensions; we call it lazily, only for items the user adds to the cart or generates a model for.
+- **Google Shopping** covers Amazon, Wayfair, Target, Walmart and others, with price, thumbnail and store. It's available
+  through two providers:
+  - **Serper.dev** is preferred: 2,500 free queries, then about $1 per 1k.
+  - **SerpAPI** gives 250 free a month, then about $15–25 per 1k.
+
+  Google's current Shopping layout returns about 40 results per call with **no pagination**, so the bulk pull spreads over
+  query variants. SerpAPI's `google_immersive_product` (1 extra search) resolves the direct store link; we call it lazily,
+  only for items added to the cart.
+
+### Catalog first, live search as fallback (voice + filters)
+- **One bulk pull** (`npm run catalog:pull`, `backend/src/inventory/pull.ts`) fills `data/inventory.json`:
+  - **IKEA** (free) returns its whole result set per query: about 2,300 real pieces in about 5 s.
+  - **Google Shopping** adds about 1,000–2,500 listings from other stores. The "light" tier is 22 calls; `--full` is 40.
+- **Classification:**
+  - Each listing is mapped to one of 22 categories, and parts and accessories are dropped ("Cover for loveseat",
+    "Sofa legs", lamp shades, door mats, patio furniture).
+  - Listing text is normalized to canonical **colors / materials / styles** ("onyx" → black, "Grann/Bomstad" → leather,
+    "walnut legs" ignored).
+  - If a title names no color, the color is guessed from the product photo, which is free.
+- **Every voice or typed turn is one fast LLM call** (`ai/assistant.ts`, heuristic parser without a key). It returns:
+  - the complete next filter state;
+  - a question type (cheapest, price range, average, count, best rated, budget left);
+  - an action (open, place, add or remove from cart), plus which listed item it refers to ("the second one").
+- **The server answers numeric questions from the real listings**, so prices are never hallucinated.
+- **Cost guard:**
+  - Filtering the catalog takes about 1–15 ms and is free.
+  - A live store search runs only when a voice or typed request has fewer than `LIVE_MIN_RESULTS` matches, or when the
+    user taps "Search stores for more".
+  - Results are added to the catalog and the query is cached, so the same question never costs twice.
+  - `SHOPPING_MONTHLY_LIMIT` hard-caps paid calls per month.
+  - Manual filter taps never trigger a paid search.
+- **Room analysis also draws from the catalog.** Picks for each category come from the pulled listings and are
+  AI-ranked, so a new room costs 0 shopping searches instead of 6–10.
 - **Not used:** Amazon PA-API 5 was retired in 2026; its replacement, the Creators API, needs 10 sales in 30 days. Wayfair and
   Target block scripts, and Wayfair's 3D API is dead.
 
@@ -124,8 +154,13 @@ iPhone web app ──► backend (Node/TS, Express)  ◄──── Quest 2 (Un
 | `POST /api/sessions/demo` | session with no photos |
 | `GET /api/sessions/latest` | the newest session, used by the Quest |
 | `GET /api/sessions/:id?since=` | poll a session |
-| `POST /api/sessions/:id/search {text}` | typed search |
-| `POST /api/sessions/:id/voice (audio)` | voice search |
+| `POST /api/sessions/:id/search {text}` | typed search that adds a category row (legacy) |
+| `POST /api/sessions/:id/voice (audio, focusProductId?)` | voice turn with the shopping assistant (transcribe → filter / answer / act) |
+| `POST /api/sessions/:id/ask {text, focusProductId?}` | the same turn, typed |
+| `PUT /api/sessions/:id/browse {filters}` | manual filters over the catalog (never a paid search) |
+| `POST /api/sessions/:id/browse/more` | "Search stores for more": live top-up for the current filters |
+| `GET /api/catalog` | catalog size, pull status, shopping usage this month, filter vocabulary |
+| `POST /api/catalog/pull {shopping: none\|light\|full}` | start a bulk pull in the background |
 | `POST /api/sessions/:id/geometry` | Quest room model |
 | `POST /api/sessions/:id/layout {productIds, user}` | → placements |
 | `PUT /api/sessions/:id/placements` | what's placed, synced to the phone |
@@ -283,7 +318,7 @@ without touching the product or 3D pipeline.
 | Item | Cost |
 |---|---|
 | OpenAI analysis + ranking | a few cents |
-| SerpAPI | about 6–10 searches (free tier: 250/month) |
+| Google Shopping | **0 per session** once the catalog is pulled. The one-time pull costs 22–40 searches (Serper free tier: 2,500; SerpAPI: 250/month). Voice only searches live when the catalog is thin, capped by `SHOPPING_MONTHLY_LIMIT`. |
 | IKEA | free |
 | Image→3D | about $0.25–0.60 per generated item |
 | **Total** | **about $1–2 per session**, dropping as the model cache fills |

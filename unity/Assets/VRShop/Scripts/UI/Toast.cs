@@ -22,11 +22,15 @@ namespace VRShop.UI
         void Awake()
         {
             Instance = this;
-            var canvas = UIKit.CreateCanvas("ToastCanvas", new Vector2(900, 90), 0.0006f);
+            // Tall enough for a voice answer: the heard text plus a two-sentence reply (auto-sized).
+            var canvas = UIKit.CreateCanvas("ToastCanvas", new Vector2(900, 150), 0.0006f);
             canvas.transform.SetParent(transform, false);
             m_Group = canvas.gameObject.AddComponent<CanvasGroup>();
-            m_Bg = UIKit.Panel(canvas.transform, "Bg", 0, 0, 900, 90, new Color(0.06f, 0.07f, 0.09f, 0.92f));
-            m_Text = UIKit.Text(m_Bg.transform, "Text", 28, 0, 844, 90, "", 30, UIKit.TextColor, TextAlignmentOptions.Center);
+            m_Bg = UIKit.Panel(canvas.transform, "Bg", 0, 0, 900, 150, new Color(0.06f, 0.07f, 0.09f, 0.92f));
+            m_Text = UIKit.Text(m_Bg.transform, "Text", 28, 8, 844, 134, "", 30, UIKit.TextColor, TextAlignmentOptions.Center);
+            m_Text.enableAutoSizing = true;
+            m_Text.fontSizeMin = 20;
+            m_Text.fontSizeMax = 30;
             m_Group.alpha = 0;
         }
 

@@ -13,26 +13,26 @@ export interface CategoryDef {
 }
 
 export const CATEGORIES: CategoryDef[] = [
-  { key: 'sofa', label: 'Sofa', dims: { w: 2.1, d: 0.9, h: 0.85 }, shape: 'sofa', mount: 'floor', anchor: 'wall', keywords: ['sofa', 'couch', 'sectional', 'loveseat', 'settee'] },
-  { key: 'armchair', label: 'Accent chair', dims: { w: 0.8, d: 0.85, h: 0.9 }, shape: 'chair', mount: 'floor', anchor: 'corner', keywords: ['armchair', 'accent chair', 'lounge chair', 'reading chair', 'recliner', 'club chair'] },
+  { key: 'sofa', label: 'Sofa', dims: { w: 2.1, d: 0.9, h: 0.85 }, shape: 'sofa', mount: 'floor', anchor: 'wall', keywords: ['sofa', 'couch', 'sectional', 'loveseat', 'settee', 'sofa bed', 'futon', 'chesterfield'] },
+  { key: 'armchair', label: 'Accent chair', dims: { w: 0.8, d: 0.85, h: 0.9 }, shape: 'chair', mount: 'floor', anchor: 'corner', keywords: ['armchair', 'accent chair', 'lounge chair', 'reading chair', 'recliner', 'club chair', 'wing chair', 'swivel chair', 'rocking chair', 'barrel chair', 'slipper chair', 'chair and a half', 'easy chair'] },
   { key: 'coffee_table', label: 'Coffee table', dims: { w: 1.1, d: 0.6, h: 0.45 }, shape: 'table', mount: 'floor', anchor: 'center', keywords: ['coffee table', 'cocktail table'] },
-  { key: 'side_table', label: 'Side table', dims: { w: 0.5, d: 0.5, h: 0.55 }, shape: 'table', mount: 'floor', anchor: 'near', keywords: ['side table', 'end table', 'accent table'] },
+  { key: 'side_table', label: 'Side table', dims: { w: 0.5, d: 0.5, h: 0.55 }, shape: 'table', mount: 'floor', anchor: 'near', keywords: ['side table', 'end table', 'accent table', 'nesting tables', 'nesting table', 'c table', 'console table'] },
   { key: 'rug', label: 'Rug', dims: { w: 2.0, d: 1.4, h: 0.01 }, shape: 'rug', mount: 'floor', anchor: 'center', keywords: ['rug', 'carpet', 'area rug'] },
-  { key: 'floor_lamp', label: 'Floor lamp', dims: { w: 0.4, d: 0.4, h: 1.6 }, shape: 'lamp', mount: 'floor', anchor: 'corner', keywords: ['floor lamp', 'arc lamp', 'torchiere'] },
-  { key: 'table_lamp', label: 'Table lamp', dims: { w: 0.3, d: 0.3, h: 0.5 }, shape: 'lamp', mount: 'floor', anchor: 'near', keywords: ['table lamp', 'desk lamp'] },
-  { key: 'bookshelf', label: 'Bookshelf', dims: { w: 0.8, d: 0.3, h: 1.8 }, shape: 'shelf', mount: 'floor', anchor: 'wall', keywords: ['bookshelf', 'bookcase', 'shelving', 'shelf unit', 'etagere'] },
+  { key: 'floor_lamp', label: 'Floor lamp', dims: { w: 0.4, d: 0.4, h: 1.6 }, shape: 'lamp', mount: 'floor', anchor: 'corner', keywords: ['floor lamp', 'arc lamp', 'torchiere', 'floor uplighter', 'standing lamp'] },
+  { key: 'table_lamp', label: 'Table lamp', dims: { w: 0.3, d: 0.3, h: 0.5 }, shape: 'lamp', mount: 'floor', anchor: 'near', keywords: ['table lamp', 'desk lamp', 'bedside lamp'] },
+  { key: 'bookshelf', label: 'Bookshelf', dims: { w: 0.8, d: 0.3, h: 1.8 }, shape: 'shelf', mount: 'floor', anchor: 'wall', keywords: ['bookshelf', 'bookcase', 'shelving', 'shelf unit', 'shelving unit', 'etagere', 'ladder shelf'] },
   { key: 'tv_stand', label: 'TV stand', dims: { w: 1.6, d: 0.4, h: 0.5 }, shape: 'box', mount: 'floor', anchor: 'wall', keywords: ['tv stand', 'tv bench', 'media console', 'tv unit', 'entertainment center'] },
-  { key: 'dining_table', label: 'Dining table', dims: { w: 1.6, d: 0.9, h: 0.75 }, shape: 'table', mount: 'floor', anchor: 'center', keywords: ['dining table', 'kitchen table'] },
+  { key: 'dining_table', label: 'Dining table', dims: { w: 1.6, d: 0.9, h: 0.75 }, shape: 'table', mount: 'floor', anchor: 'center', keywords: ['dining table', 'kitchen table', 'dining set', 'table and 2 chairs', 'table and 4 chairs', 'table and 6 chairs', 'table and 4 armchairs', 'table and 2 benches'] },
   { key: 'dining_chair', label: 'Dining chair', dims: { w: 0.45, d: 0.5, h: 0.85 }, shape: 'chair', mount: 'floor', anchor: 'near', keywords: ['dining chair', 'kitchen chair'] },
-  { key: 'desk', label: 'Desk', dims: { w: 1.2, d: 0.6, h: 0.75 }, shape: 'table', mount: 'floor', anchor: 'wall', keywords: ['desk', 'writing desk', 'computer desk', 'workstation'] },
+  { key: 'desk', label: 'Desk', dims: { w: 1.2, d: 0.6, h: 0.75 }, shape: 'table', mount: 'floor', anchor: 'wall', keywords: ['desk', 'writing desk', 'computer desk', 'workstation', 'standing desk'] },
   { key: 'office_chair', label: 'Desk chair', dims: { w: 0.65, d: 0.65, h: 1.1 }, shape: 'chair', mount: 'floor', anchor: 'near', keywords: ['office chair', 'desk chair', 'task chair', 'gaming chair'] },
-  { key: 'bed', label: 'Bed', dims: { w: 1.6, d: 2.1, h: 1.0 }, shape: 'bed', mount: 'floor', anchor: 'wall', keywords: ['bed', 'bed frame', 'platform bed', 'daybed'] },
+  { key: 'bed', label: 'Bed', dims: { w: 1.6, d: 2.1, h: 1.0 }, shape: 'bed', mount: 'floor', anchor: 'wall', keywords: ['bed', 'bed frame', 'platform bed', 'daybed', 'upholstered bed', 'canopy bed'] },
   { key: 'nightstand', label: 'Nightstand', dims: { w: 0.45, d: 0.4, h: 0.55 }, shape: 'box', mount: 'floor', anchor: 'near', keywords: ['nightstand', 'bedside table', 'night stand'] },
   { key: 'dresser', label: 'Dresser', dims: { w: 1.2, d: 0.5, h: 0.8 }, shape: 'box', mount: 'floor', anchor: 'wall', keywords: ['dresser', 'chest of drawers', 'sideboard', 'credenza', 'buffet'] },
   { key: 'cabinet', label: 'Cabinet', dims: { w: 0.8, d: 0.4, h: 1.0 }, shape: 'box', mount: 'floor', anchor: 'wall', keywords: ['cabinet', 'storage cabinet', 'wardrobe', 'armoire', 'display cabinet'] },
   { key: 'ottoman', label: 'Ottoman / pouf', dims: { w: 0.6, d: 0.6, h: 0.45 }, shape: 'cylinder', mount: 'floor', anchor: 'near', keywords: ['ottoman', 'pouf', 'footstool', 'footrest'] },
   { key: 'bench', label: 'Bench', dims: { w: 1.2, d: 0.4, h: 0.45 }, shape: 'box', mount: 'floor', anchor: 'wall', keywords: ['bench'] },
-  { key: 'plant', label: 'Plant', dims: { w: 0.5, d: 0.5, h: 1.2 }, shape: 'plant', mount: 'floor', anchor: 'corner', keywords: ['plant', 'artificial plant', 'potted plant', 'planter', 'tree'] },
+  { key: 'plant', label: 'Plant', dims: { w: 0.5, d: 0.5, h: 1.2 }, shape: 'plant', mount: 'floor', anchor: 'corner', keywords: ['plant', 'artificial plant', 'potted plant', 'faux plant', 'artificial tree', 'fiddle leaf', 'olive tree'] },
   { key: 'wall_art', label: 'Wall art', dims: { w: 0.8, d: 0.03, h: 0.6 }, shape: 'panel', mount: 'wall', anchor: 'wall', keywords: ['wall art', 'poster', 'print', 'painting', 'canvas', 'frame', 'picture'] },
   { key: 'mirror', label: 'Mirror', dims: { w: 0.6, d: 0.03, h: 1.5 }, shape: 'panel', mount: 'wall', anchor: 'wall', keywords: ['mirror'] },
 ];
@@ -45,7 +45,7 @@ export function categoryDef(key: string): CategoryDef {
 
 /** Map free text ("mid-century accent chair") to a category key. Longest keyword match wins. */
 export function normalizeCategory(text: string): string {
-  const t = ` ${text.toLowerCase().replace(/[^a-z ]/g, ' ')} `;
+  const t = ` ${text.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()} `;
   if (BY_KEY.has(text.trim().toLowerCase())) return text.trim().toLowerCase();
   let best: { key: string; len: number } | null = null;
   for (const c of CATEGORIES) {
@@ -56,6 +56,44 @@ export function normalizeCategory(text: string): string {
     }
   }
   return best?.key ?? text.trim().toLowerCase().replace(/\s+/g, '_').slice(0, 30);
+}
+
+/** Like normalizeCategory, but only returns one of our known category keys (or null). */
+export function matchCategory(text: string): string | null {
+  const key = normalizeCategory(text);
+  return BY_KEY.has(key) ? key : null;
+}
+
+/** Plural display label: "Sofas", "Accent chairs", "Ottomans / poufs". */
+export function pluralLabel(key: string): string {
+  const label = categoryDef(key).label;
+  return label.split(' / ').map((w) => (/lf$/i.test(w) ? `${w.slice(0, -1)}ves` : /(s|sh|ch)$/i.test(w) ? `${w}es` : /[^aeiou]y$/i.test(w) ? `${w.slice(0, -1)}ies` : `${w}s`)).join(' / ');
+}
+
+// Parts and accessories that product searches return alongside the real thing ("Cover for loveseat", "Sofa legs",
+// "Lamp shade"). A trailing "with removable cushion covers" is NOT an accessory, so only look at the head of the title.
+const ACC = '(covers?|cvr|slipcovers?|cushions?|pads?|legs?|feet|protectors?|trays?|armrests?|sections?|shades?|inserts?|replacement|parts?|kits?|bulbs?|glides?|risers?|hardware|brackets?|hooks?|knobs?|handles?|casters?|sheets?|duvets?|pillowcases?|bedspreads?|mattress(?:es)?|slats?|slatted bed base|headboards?|stand for|lint brush)';
+const ACC_START = new RegExp(`^\\s*(?:[\\w-]+\\s+){0,2}${ACC}\\b`, 'i');     // "Cover for ...", "Stretch sofa cover"
+const ACC_FOR = new RegExp(`\\b${ACC}\\s+(?:for|to fit)\\b`, 'i');             // "... cushion for sofa"
+// Things store searches return that aren't furniture at all (looked for in the head of the title / IKEA type name).
+const NOT_FURNITURE = /\b(towels?|door ?mats?|bath mats?|place ?mats?|tablecloths?|oven mitts?|throws?|throw blankets?|duvets?|pillowcases?|clocks?|glass doors?|sliding doors?|mirror doors?|ledges?|holders?|laptop supports?|underframes?|table ?tops?|add-on units?|seat shells?|bases?|glass tops?|bouquets?|wreaths?|garlands?|artificial flowers?|flowers?|christmas|sprays?|plant pots?|plant stands?|lamp stands?|laptop stands?|monitor stands?|pockets?)\b/i;
+const OUTDOOR = /\b(outdoor|patio)\b/i;
+const IN_OUTDOOR = /\b(in ?\/ ?outdoor|indoor ?\/ ?outdoor|indoor (?:and|or|&) outdoor)\b/i;
+
+export function isAccessory(title: string, category?: string): boolean {
+  // This app furnishes an indoor room: skip patio furniture (but keep "indoor/outdoor" rugs).
+  if (OUTDOOR.test(title) && !IN_OUTDOOR.test(title)) return true;
+  const head = title.split(/,|\bwith\b|\bw\/|\||-\s/i)[0];
+  if (NOT_FURNITURE.test(head)) return true;
+  if (category === 'rug' || category === 'wall_art' || category === 'mirror') return /\b(rug pad|gripper|hanging kit|hooks?)\b/i.test(title);
+  if (ACC_START.test(head) || ACC_FOR.test(head)) return true;
+  // "<item> cover", "<item> legs": accessory word right after the category keyword in the head of the title.
+  if (category) {
+    for (const k of categoryDef(category).keywords) {
+      if (new RegExp(`\\b${k}s?\\s+${ACC}\\b`, 'i').test(head)) return true;
+    }
+  }
+  return false;
 }
 
 export const titleCase = (s: string) => s.replace(/\b\w/g, (m) => m.toUpperCase());

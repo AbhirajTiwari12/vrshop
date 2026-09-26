@@ -45,10 +45,14 @@ namespace VRShop.Api
         public Task<Product> EnsureModel(string productId, bool generate = true) => Send<Product>("POST", $"/api/products/{productId}/model", new { generate });
         public Task<Product> GetProduct(string productId) => Send<Product>("GET", $"/api/products/{productId}");
         public Task<SearchResponse> Search(string id, string text) => Send<SearchResponse>("POST", $"/api/sessions/{id}/search", new { text }, 60);
+        public Task<VoiceResponse> Ask(string id, string text, string focusProductId = null) => Send<VoiceResponse>("POST", $"/api/sessions/{id}/ask", new { text, focusProductId }, 60);
+        public Task<Session> SetBrowse(string id, Filters filters) => Send<Session>("PUT", $"/api/sessions/{id}/browse", new { filters });
+        public Task<BrowseMoreResponse> BrowseMore(string id) => Send<BrowseMoreResponse>("POST", $"/api/sessions/{id}/browse/more", new { }, 60);
 
-        public async Task<VoiceResponse> Voice(string sessionId, byte[] wav)
+        public async Task<VoiceResponse> Voice(string sessionId, byte[] wav, string focusProductId = null)
         {
             var form = new List<IMultipartFormSection> { new MultipartFormFileSection("audio", wav, "speech.wav", "audio/wav") };
+            if (!string.IsNullOrEmpty(focusProductId)) form.Add(new MultipartFormDataSection("focusProductId", focusProductId));
             using var req = UnityWebRequest.Post($"{BaseUrl}/api/sessions/{sessionId}/voice", form);
             req.timeout = 60;
             await SendAsync(req);

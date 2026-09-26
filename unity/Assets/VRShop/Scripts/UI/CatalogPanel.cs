@@ -14,21 +14,30 @@ namespace VRShop.UI
     /// <summary>
     /// The in-headset store: room summary, AI-recommended categories as tabs, a 3x2 grid of real products
     /// (photo, store, price, rating, 3D-model source), a detail view with Place / Add to cart, and the cart
-    /// with budget tracking. Summon / hide with A.
+    /// with budget tracking. The Browse tab searches the whole pulled catalog: voice (hold X) or the filter bar
+    /// (each button cycles through the values that have matches). Summon / hide with A.
     /// </summary>
     public class CatalogPanel : MonoBehaviour
     {
         public static CatalogPanel Instance { get; private set; }
 
         const float W = 1280, H = 820, Scale = 0.00075f; // 0.96 m x 0.62 m
-        const int PerPage = 6, TabsPerPage = 5;
+        const int PerPage = 6, TabsPerPage = 4;
+        const string BrowseKey = "__browse", CartKey = "__cart";
+        static readonly (float min, float max, string label)[] k_PricePresets =
+            { (0, 0, "Any price"), (0, 200, "Under $200"), (0, 500, "Under $500"), (0, 1000, "Under $1,000"), (0, 2000, "Under $2,000"), (1000, 0, "$1,000+") };
+        static readonly (string key, string label)[] k_Sorts = { ("relevance", "Best match"), ("price_asc", "Price: low"), ("price_desc", "Price: high"), ("rating", "Top rated") };
 
         Canvas m_Canvas;
         CanvasGroup m_Group;
         TextMeshProUGUI m_Title, m_Summary, m_CartSummary, m_Stage, m_Tags, m_PageLabel, m_Hint;
         readonly List<Image> m_Swatches = new List<Image>();
         readonly List<UIButton> m_Tabs = new List<UIButton>();
-        UIButton m_TabPrev, m_TabNext, m_CartTab, m_Prev, m_Next, m_Design;
+        UIButton m_TabPrev, m_TabNext, m_CartTab, m_BrowseTab, m_Prev, m_Next, m_Design, m_More;
+        RectTransform m_FilterBar;
+        UIButton m_FCategory, m_FPrice, m_FColor, m_FMaterial, m_FSort, m_F3d, m_FClear;
+        TextMeshProUGUI m_FilterText;
+        bool m_FilterBusy;
         RectTransform m_Grid, m_Detail, m_CartView, m_Message;
         TextMeshProUGUI m_MessageText;
         readonly List<Card> m_Cards = new List<Card>();
@@ -41,7 +50,7 @@ namespace VRShop.UI
         TextMeshProUGUI m_CartTotal, m_CartNote;
         Image m_BudgetBar, m_BudgetFill;
 
-        string m_Category;           // selected category key, or "__cart"
+        string m_Category;           // selected category key, "__browse" or "__cart"
         int m_TabPage, m_Page;
         Product m_DetailProduct;
         bool m_Visible = true;
@@ -139,13 +148,25 @@ namespace VRShop.UI
 
             // Tabs
             m_TabPrev = UIKit.Button(root, "TabPrev", 36, 186, 56, 52, "<", 26, () => { m_TabPage = Mathf.Max(0, m_TabPage - 1); RefreshTabs(); });
+            m_BrowseTab = UIKit.Button(root, "BrowseTab", 100, 186, 180, 52, "Browse all", 20, ShowBrowse);
             for (var i = 0; i < TabsPerPage; i++)
             {
                 var idx = i;
-                m_Tabs.Add(UIKit.Button(root, $"Tab{i}", 100 + i * 188, 186, 180, 52, "", 20, () => SelectTab(idx)));
+                m_Tabs.Add(UIKit.Button(root, $"Tab{i}", 288 + i * 188, 186, 180, 52, "", 20, () => SelectTab(idx)));
             }
             m_TabNext = UIKit.Button(root, "TabNext", 1044, 186, 56, 52, ">", 26, () => { m_TabPage++; RefreshTabs(); });
-            m_CartTab = UIKit.Button(root, "CartTab", 1108, 186, 136, 52, "Cart", 21, () => { m_Category = "__cart"; m_Page = 0; m_DetailProduct = null; RefreshContent(); RefreshTabs(); });
+            m_CartTab = UIKit.Button(root, "CartTab", 1108, 186, 136, 52, "Cart", 21, () => { m_Category = CartKey; m_Page = 0; m_DetailProduct = null; Refresh(); });
+
+            // Browse filter bar (replaces the room summary while browsing). Each button cycles its values.
+            m_FilterBar = UIKit.Box(root, "FilterBar", 36, 84, 1208, 52);
+            m_FCategory = UIKit.Button(m_FilterBar, "Category", 0, 0, 206, 52, "", 18, CycleCategory);
+            m_FPrice = UIKit.Button(m_FilterBar, "Price", 214, 0, 190, 52, "", 18, CyclePrice);
+            m_FColor = UIKit.Button(m_FilterBar, "Color", 412, 0, 176, 52, "", 18, CycleColor);
+            m_FMaterial = UIKit.Button(m_FilterBar, "Material", 596, 0, 196, 52, "", 18, CycleMaterial);
+            m_FSort = UIKit.Button(m_FilterBar, "Sort", 800, 0, 170, 52, "", 18, CycleSort);
+            m_F3d = UIKit.Button(m_FilterBar, "Only3d", 978, 0, 110, 52, "3D", 18, Toggle3d);
+            m_FClear = UIKit.Button(m_FilterBar, "Clear", 1096, 0, 112, 52, "Clear", 18, () => ApplyFilters(new Filters()));
+            m_FilterText = UIKit.Text(root, "FilterText", 36, 142, 1208, 30, "", 19, UIKit.Muted);
 
             // Content: grid
             m_Grid = UIKit.Box(root, "Grid", 0, 0, W, H);
@@ -181,7 +202,7 @@ namespace VRShop.UI
             m_DWhy = UIKit.Text(m_Detail, "Why", 466, 276, 720, 76, "", 20, UIKit.Muted, TextAlignmentOptions.TopLeft, FontStyles.Italic);
             m_DPlace = UIKit.Button(m_Detail, "Place", 466, 366, 290, 72, "Place in my room", 24, PlaceDetail, true);
             m_DCart = UIKit.Button(m_Detail, "Cart", 770, 366, 230, 72, "Add to cart", 22, ToggleDetailCart);
-            UIKit.Button(m_Detail, "Back", 1014, 366, 172, 72, "Back", 22, () => { m_DetailProduct = null; RefreshContent(); });
+            UIKit.Button(m_Detail, "Back", 1014, 366, 172, 72, "Back", 22, () => { m_DetailProduct = null; RefreshContent(); RefreshFooter(); });
 
             // Content: cart
             m_CartView = UIKit.Box(root, "CartView", 36, 254, 1208, 458);
@@ -214,10 +235,13 @@ namespace VRShop.UI
             m_PageLabel = UIKit.Text(root, "Page", 160, 730, 110, 60, "", 20, UIKit.Muted, TextAlignmentOptions.Center);
             m_Next = UIKit.Button(root, "Next", 274, 730, 120, 60, "Next >", 20, () => { m_Page++; RefreshContent(); });
             m_Design = UIKit.Button(root, "Design", 470, 730, 566, 60, "Design my room", 24, () => VRShopApp.Instance.DesignMyRoom(), true);
+            m_More = UIKit.Button(root, "More", 470, 730, 566, 60, "Search stores for more", 22, SearchStores, true);
+            m_More.gameObject.SetActive(false);
             UIKit.Button(root, "Hide", 1052, 730, 192, 60, "Hide  (A)", 20, Hide);
-            m_Hint = UIKit.Text(root, "Hint", 36, 794, 1208, 24, "Hold X and say what you want  •  Trigger: select / drag  •  Stick: rotate  •  B: delete", 16, UIKit.Muted, TextAlignmentOptions.Center);
+            m_Hint = UIKit.Text(root, "Hint", 36, 794, 1208, 24, "Hold X and talk: \"black leather sofa\", \"anything cheaper?\", \"add the second one\"  •  Trigger: select / drag  •  B: delete", 16, UIKit.Muted, TextAlignmentOptions.Center);
 
             SetContent(m_Message);
+            UpdateHeaderMode();
         }
 
         void SetContent(RectTransform which)
@@ -251,7 +275,7 @@ namespace VRShop.UI
                 if (m_Visible) UIKit.PlaceInFront(transform, 0.95f, 0.12f);
             }
             var room = s.room;
-            m_Title.text = room != null ? $"Your {room.roomType}" : "Your room";
+            m_Title.text = m_Category == BrowseKey ? BrowseTitle(s) : room != null ? $"Your {room.roomType}" : "Your room";
             m_Summary.text = room?.summary ?? (string.IsNullOrEmpty(s.prompt) ? "" : s.prompt);
             m_Tags.text = room != null ? string.Join("  •  ", room.styleTags.Take(5)) : "";
             for (var i = 0; i < m_Swatches.Count; i++)
@@ -261,16 +285,16 @@ namespace VRShop.UI
             }
             var cartCount = s.cart?.Sum(c => c.qty) ?? 0;
             m_CartSummary.text = s.budget.HasValue ? $"Cart {cartCount}  •  {UIKit.Money(s.cartTotal)} / {UIKit.Money(s.budget)}" : $"Cart {cartCount}  •  {UIKit.Money(s.cartTotal)}";
-            m_Stage.text = s.status == "ready" ? "" : s.status == "error" ? $"Error: {s.error}" : s.stage;
+            m_Stage.text = s.status == "ready" || m_Category == BrowseKey ? "" : s.status == "error" ? $"Error: {s.error}" : s.stage;
 
-            if (s.categories == null || s.categories.Count == 0)
+            if ((s.categories == null || s.categories.Count == 0) && m_Category != BrowseKey)
             {
                 ShowMessage(s.status == "error" ? $"Something went wrong:\n{s.error}" : $"{s.stage}\n\n<size=24><color=#A9B0BC>Finding real furniture that fits your room…</color></size>");
                 RefreshTabs();
                 RefreshFooter();
                 return;
             }
-            if (m_Category == null || (m_Category != "__cart" && s.categories.All(c => c.category != m_Category)))
+            if (m_Category == null || (m_Category != CartKey && m_Category != BrowseKey && s.categories.All(c => c.category != m_Category)))
             {
                 m_Category = s.categories[0].category;
                 m_Page = 0;
@@ -298,9 +322,12 @@ namespace VRShop.UI
             }
             m_TabPrev.gameObject.SetActive(m_TabPage > 0);
             m_TabNext.gameObject.SetActive(m_TabPage < pages - 1);
-            var cartSel = m_Category == "__cart";
+            var cartSel = m_Category == CartKey;
             m_CartTab.SetLabel($"Cart ({S?.cart?.Sum(c => c.qty) ?? 0})");
             m_CartTab.SetColors(cartSel ? UIKit.Accent : UIKit.ButtonBg, cartSel ? UIKit.AccentHover : UIKit.ButtonBgHover);
+            var browseSel = m_Category == BrowseKey;
+            m_BrowseTab.SetColors(browseSel ? UIKit.Accent : UIKit.ButtonBg, browseSel ? UIKit.AccentHover : UIKit.ButtonBgHover);
+            UpdateHeaderMode();
         }
 
         void SelectTab(int i)
@@ -311,8 +338,7 @@ namespace VRShop.UI
             m_Category = cats[ci].category;
             m_Page = 0;
             m_DetailProduct = null;
-            RefreshTabs();
-            RefreshContent();
+            Refresh();
         }
 
         /// <summary>Jump to a category (e.g. after a voice search).</summary>
@@ -327,8 +353,7 @@ namespace VRShop.UI
             m_Page = 0;
             m_DetailProduct = null;
             Show();
-            RefreshTabs();
-            RefreshContent();
+            Refresh();
         }
 
         void RefreshContent()
@@ -336,11 +361,16 @@ namespace VRShop.UI
             var s = S;
             if (s == null) return;
             if (m_DetailProduct != null) { ShowDetail(m_DetailProduct); return; }
-            if (m_Category == "__cart") { ShowCart(); return; }
+            if (m_Category == CartKey) { ShowCart(); return; }
+            if (m_Category == BrowseKey) { ShowBrowseGrid(s); return; }
             var cat = s.categories.FirstOrDefault(c => c.category == m_Category);
             if (cat == null) return;
+            FillGrid(s, cat.productIds);
+        }
+
+        void FillGrid(Session s, List<string> ids)
+        {
             SetContent(m_Grid);
-            var ids = cat.productIds;
             var pages = Mathf.Max(1, Mathf.CeilToInt(ids.Count / (float)PerPage));
             m_Page = Mathf.Clamp(m_Page, 0, pages - 1);
             m_PageLabel.text = $"{m_Page + 1} / {pages}";
@@ -408,6 +438,7 @@ namespace VRShop.UI
             var inCart = S != null && S.InCart(p.id);
             m_DCart.SetLabel(inCart ? "Remove from cart" : "Add to cart");
             LoadImage(m_DImage, p, () => m_DetailProduct != null && m_DetailProduct.id == p.id);
+            RefreshFooter();
         }
 
         void PlaceDetail()
@@ -481,7 +512,203 @@ namespace VRShop.UI
 
         void RefreshFooter()
         {
-            if (m_Design != null) m_Design.Interactable = S != null && S.categories != null && S.categories.Count > 0;
+            if (m_Design == null) return;
+            m_Design.Interactable = S != null && S.categories != null && S.categories.Count > 0;
+            var b = S?.browse;
+            var thin = m_Category == BrowseKey && m_DetailProduct == null && b != null && b.total < 6 &&
+                       (!string.IsNullOrEmpty(b.filters?.category) || (b.filters?.keywords?.Count ?? 0) > 0);
+            m_More.gameObject.SetActive(thin);
+            m_Design.gameObject.SetActive(!thin);
+        }
+
+        // ------------------------------------------------------------------ browse (whole catalog, voice + filters)
+        public string FocusedProductId => m_DetailProduct?.id;
+
+        /// <summary>Open the Browse tab (after a voice answer, or from the tab button).</summary>
+        public void ShowBrowse()
+        {
+            m_Category = BrowseKey;
+            m_Page = 0;
+            m_DetailProduct = null;
+            Show();
+            Refresh();
+        }
+
+        /// <summary>Open a product's detail view (voice: "tell me about the second one").</summary>
+        public void OpenProduct(string productId)
+        {
+            var p = S?.GetProduct(productId);
+            if (p == null) return;
+            Show();
+            m_DetailProduct = p;
+            ShowDetail(p);
+            RefreshFooter();
+            if (!p.model.IsReady && !p.model.IsBusy) _ = Api.EnsureModel(p.id, p.source == "ikea");
+        }
+
+        void UpdateHeaderMode()
+        {
+            var browsing = m_Category == BrowseKey;
+            m_Summary.gameObject.SetActive(!browsing);
+            m_Tags.gameObject.SetActive(!browsing);
+            foreach (var sw in m_Swatches) sw.gameObject.SetActive(!browsing);
+            m_FilterBar.gameObject.SetActive(browsing);
+            m_FilterText.gameObject.SetActive(browsing);
+            if (browsing) RefreshFilterBar();
+        }
+
+        static string Pretty(string key) => string.IsNullOrEmpty(key) ? "" : char.ToUpper(key[0]) + key.Substring(1).Replace('_', ' ');
+
+        string BrowseTitle(Session s)
+        {
+            var b = s.browse;
+            if (b == null) return "Browse the catalog";
+            return b.total == 1 ? "1 match" : $"{b.total:N0} matches";
+        }
+
+        string PriceLabel(Filters f)
+        {
+            var lo = f?.minPrice ?? 0; var hi = f?.maxPrice ?? 0;
+            if (lo > 0 && hi > 0) return $"{UIKit.Money(lo)}–{UIKit.Money(hi)}";
+            if (hi > 0) return $"Under {UIKit.Money(hi)}";
+            if (lo > 0) return $"{UIKit.Money(lo)}+";
+            return "Any price";
+        }
+
+        void RefreshFilterBar()
+        {
+            var b = S?.browse;
+            var f = b?.filters ?? new Filters();
+            m_FCategory.SetLabel(string.IsNullOrEmpty(f.category) ? "All furniture" : Pretty(f.category));
+            m_FPrice.SetLabel(PriceLabel(f));
+            m_FColor.SetLabel(f.colors != null && f.colors.Count > 0 ? Pretty(string.Join("/", f.colors)) : "Any color");
+            m_FMaterial.SetLabel(f.materials != null && f.materials.Count > 0 ? Pretty(string.Join("/", f.materials)) : "Any material");
+            m_FSort.SetLabel(k_Sorts.FirstOrDefault(x => x.key == (f.sort ?? "relevance")).label ?? "Best match");
+            var on3d = f.only3d == true;
+            m_F3d.SetLabel(on3d ? "3D only" : "3D");
+            m_F3d.SetColors(on3d ? UIKit.Accent : UIKit.ButtonBg, on3d ? UIKit.AccentHover : UIKit.ButtonBgHover);
+            foreach (var btn in new[] { m_FCategory, m_FPrice, m_FColor, m_FMaterial, m_FSort, m_F3d, m_FClear }) btn.Interactable = !m_FilterBusy;
+
+            var parts = new List<string>();
+            if (f.keywords != null) parts.AddRange(f.keywords.Select(k => $"\"{k}\""));
+            if (f.styles != null) parts.AddRange(f.styles.Select(Pretty));
+            if (f.stores != null) parts.AddRange(f.stores.Select(x => $"from {x}"));
+            if (f.minRating.HasValue) parts.Add($"{f.minRating:0.#}+ stars");
+            if (f.maxWidthM.HasValue) parts.Add($"max {Mathf.RoundToInt(f.maxWidthM.Value * 100)} cm wide");
+            var range = b?.priceRange != null ? $"{UIKit.Money(b.priceRange.min)} – {UIKit.Money(b.priceRange.max)}" : "";
+            var lastReply = S?.chat?.LastOrDefault(t => t.role == "assistant")?.text;
+            m_FilterText.text = b == null
+                ? "Hold X and say what you want, or use the filters above."
+                : string.Join("   •   ", new[] { string.Join(", ", parts), range, string.IsNullOrEmpty(lastReply) ? "" : $"<color=#8FB8FF>{lastReply}</color>" }.Where(x => !string.IsNullOrEmpty(x)));
+        }
+
+        void ShowBrowseGrid(Session s)
+        {
+            var b = s.browse;
+            if (b == null || b.productIds == null || b.productIds.Count == 0)
+            {
+                ShowMessage(b == null
+                    ? "Hold <b>X</b> and say what you're looking for\n<size=26><color=#A9B0BC>\"a black leather sofa under $1,500\"  •  \"what's the cheapest?\"  •  \"only IKEA\"</color></size>"
+                    : "Nothing matches these filters\n<size=26><color=#A9B0BC>Try a higher price, press Clear, or search stores for more.</color></size>");
+                RefreshFooter();
+                return;
+            }
+            FillGrid(s, b.productIds);
+            RefreshFooter();
+        }
+
+        /// <summary>Next value in a list, wrapping to "any" (null) after the last one.</summary>
+        static string Next(IList<string> options, string current)
+        {
+            var i = current == null ? -1 : options.IndexOf(current);
+            return i + 1 < options.Count ? options[i + 1] : null;
+        }
+
+        Filters CurrentFilters() => S?.browse?.filters?.Clone() ?? new Filters();
+
+        void CycleCategory()
+        {
+            var f = CurrentFilters();
+            var options = (S?.browse?.facets?.categories ?? new List<Facet>()).Take(14).Select(x => x.value).ToList();
+            f.category = Next(options, f.category);
+            ApplyFilters(f);
+        }
+
+        void CyclePrice()
+        {
+            var f = CurrentFilters();
+            var cur = System.Array.FindIndex(k_PricePresets, x => Mathf.Approximately(x.min, f.minPrice ?? 0) && Mathf.Approximately(x.max, f.maxPrice ?? 0));
+            var next = k_PricePresets[(cur + 1) % k_PricePresets.Length];
+            f.minPrice = next.min > 0 ? next.min : (float?)null;
+            f.maxPrice = next.max > 0 ? next.max : (float?)null;
+            ApplyFilters(f);
+        }
+
+        void CycleColor()
+        {
+            var f = CurrentFilters();
+            var options = (S?.browse?.facets?.colors ?? new List<Facet>()).Take(8).Select(x => x.value).ToList();
+            var next = Next(options, f.colors != null && f.colors.Count > 0 ? f.colors[0] : null);
+            f.colors = next == null ? null : new List<string> { next };
+            ApplyFilters(f);
+        }
+
+        void CycleMaterial()
+        {
+            var f = CurrentFilters();
+            var options = (S?.browse?.facets?.materials ?? new List<Facet>()).Take(8).Select(x => x.value).ToList();
+            var next = Next(options, f.materials != null && f.materials.Count > 0 ? f.materials[0] : null);
+            f.materials = next == null ? null : new List<string> { next };
+            ApplyFilters(f);
+        }
+
+        void CycleSort()
+        {
+            var f = CurrentFilters();
+            var i = System.Array.FindIndex(k_Sorts, x => x.key == (f.sort ?? "relevance"));
+            f.sort = k_Sorts[(i + 1) % k_Sorts.Length].key;
+            ApplyFilters(f);
+        }
+
+        void Toggle3d()
+        {
+            var f = CurrentFilters();
+            f.only3d = f.only3d == true ? (bool?)null : true;
+            ApplyFilters(f);
+        }
+
+        async void ApplyFilters(Filters f)
+        {
+            if (S == null || m_FilterBusy) return;
+            m_FilterBusy = true;
+            RefreshFilterBar();
+            try
+            {
+                var s = await Api.SetBrowse(S.id, f);
+                m_Page = 0;
+                VRShopApp.Instance.SetSession(s);
+            }
+            catch (System.Exception e) { Toast.Show($"Filter failed: {e.Message}"); }
+            finally
+            {
+                m_FilterBusy = false;
+                if (m_Category == BrowseKey) RefreshFilterBar();
+            }
+        }
+
+        async void SearchStores()
+        {
+            if (S == null || m_FilterBusy) return;
+            m_FilterBusy = true;
+            Toast.Sticky("Searching stores for more…");
+            try
+            {
+                var res = await Api.BrowseMore(S.id);
+                if (res.session != null) VRShopApp.Instance.SetSession(res.session);
+                Toast.Show(res.added > 0 ? $"Found {res.added} more" : "No new matches in stores (or the monthly search limit is reached)", 4);
+            }
+            catch (System.Exception e) { Toast.Show($"Store search failed: {e.Message}"); }
+            finally { m_FilterBusy = false; }
         }
     }
 }

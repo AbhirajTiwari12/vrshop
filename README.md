@@ -40,14 +40,22 @@ cp .env.example .env
 ```
 
 Put your keys in `backend/.env` (all optional — without keys it still works with IKEA products and heuristic room analysis):
-`OPENAI_API_KEY` (room vision, ranking, voice), `SERPAPI_KEY` (Google Shopping: Amazon/Wayfair/Target…), and one of
+`OPENAI_API_KEY` (room vision, ranking, voice), `SERPER_API_KEY` (preferred: 2,500 free searches) or `SERPAPI_KEY`
+(Google Shopping: Amazon/Wayfair/Target…), and one of
 `FAL_KEY` / `MESHY_API_KEY` / `TRIPO_API_KEY` (AI 3D models for non-IKEA products).
 
 ```bash
 npm run dev
 ```
 
-It prints the URL to use, e.g. `http://192.168.1.23:8787`. Check everything end to end:
+It prints the URL to use, e.g. `http://192.168.1.23:8787`. Then fill the product catalog once (IKEA is free; Google
+Shopping asks before spending paid searches):
+
+```bash
+npm run catalog:pull
+```
+
+Check everything end to end:
 
 ```bash
 npm run smoke
@@ -71,9 +79,10 @@ the backend with `cloudflared tunnel --url http://localhost:8787` and use the ht
 | Piece | With keys | Without keys |
 |---|---|---|
 | Room understanding | OpenAI vision (`gpt-6-sol`) on your photos | keyword heuristics from your text |
-| Products | IKEA + Google Shopping (all stores), AI-ranked for your room | IKEA only, ranked by rating/price |
+| Products | Pulled catalog: IKEA + Google Shopping (all stores), AI-ranked for your room | IKEA catalog only, ranked by rating/price |
 | 3D models | IKEA official GLBs (~80% of IKEA items) + AI-generated from listing photos | IKEA official GLBs + true-size procedural stand-ins |
-| Voice search | OpenAI transcription + intent | — (typed search on the phone still works) |
+| Voice / chat shopping assistant | OpenAI transcription + filter/intent parsing over the pulled catalog | keyword parser (typing works; voice needs the key for transcription) |
+| Manual filters (category, price, color, material, store, sort, 3D-only) | same | same |
 | Layout ("Design my room") | deterministic solver over your real room geometry | same |
 
 Before a demo: `npm run reset` clears old sessions (keeps the cached 3D models), then create a fresh room from the phone.

@@ -49,6 +49,7 @@ namespace VRShop.Api
         public Dims dims;
         public string dimsSource; // listing | model | estimated
         public List<string> colors = new List<string>();
+        public ProductAttrs attrs;
         public string why;
         public float? fitScore;
         public ModelInfo model = new ModelInfo { status = "none" };
@@ -66,6 +67,57 @@ namespace VRShop.Api
             }
         }
     }
+
+    public class ProductAttrs
+    {
+        public List<string> colors = new List<string>();
+        public List<string> materials = new List<string>();
+        public List<string> styles = new List<string>();
+    }
+
+    /// <summary>Catalog filter state (backend/src/types.ts Filters). Null / empty = any.</summary>
+    public class Filters
+    {
+        public string category;
+        public List<string> keywords;
+        public List<string> colors;
+        public List<string> materials;
+        public List<string> styles;
+        public List<string> stores;
+        public float? minPrice;
+        public float? maxPrice;
+        public float? minRating;
+        public float? maxWidthM;
+        public float? maxDepthM;
+        public float? maxHeightM;
+        public bool? only3d;
+        public string sort; // relevance | price_asc | price_desc | rating
+
+        public Filters Clone() => new Filters
+        {
+            category = category, keywords = keywords == null ? null : new List<string>(keywords), colors = colors == null ? null : new List<string>(colors),
+            materials = materials == null ? null : new List<string>(materials), styles = styles == null ? null : new List<string>(styles),
+            stores = stores == null ? null : new List<string>(stores), minPrice = minPrice, maxPrice = maxPrice, minRating = minRating,
+            maxWidthM = maxWidthM, maxDepthM = maxDepthM, maxHeightM = maxHeightM, only3d = only3d, sort = sort,
+        };
+    }
+
+    public class Facet { public string value; public int count; }
+    public class Facets { public List<Facet> categories = new List<Facet>(); public List<Facet> colors = new List<Facet>(); public List<Facet> materials = new List<Facet>(); public List<Facet> stores = new List<Facet>(); }
+    public class PriceRange { public float min, max, median; }
+
+    /// <summary>Current catalog query + results for a session (voice or manual filters).</summary>
+    public class BrowseResult
+    {
+        public Filters filters = new Filters();
+        public List<string> productIds = new List<string>();
+        public int total;
+        public PriceRange priceRange;
+        public Facets facets;
+        public string liveSearched;
+    }
+
+    public class ChatTurn { public string role; public string text; public string via; }
 
     public class PaletteColor { public string hex; public string name; }
     public class Lighting { public string mood; public float brightness; public float kelvin; }
@@ -130,6 +182,8 @@ namespace VRShop.Api
         public List<CartItem> cart = new List<CartItem>();
         public List<Placement> placements = new List<Placement>();
         public Dictionary<string, Product> products = new Dictionary<string, Product>();
+        public BrowseResult browse;
+        public List<ChatTurn> chat = new List<ChatTurn>();
         public float cartTotal;
         public long updatedAt;
 
@@ -157,15 +211,20 @@ namespace VRShop.Api
 
     public class SearchResponse { public CategoryResult result; public Session session; }
 
+    /// <summary>One assistant turn (voice or typed): what was heard, the answer, and an optional action.</summary>
     public class VoiceResponse
     {
         public string transcript;
         public string reply;
+        public string action;     // none | open | add_to_cart | remove_from_cart | place
+        public string productId;  // the product the action/question refers to
         public bool atPointer;
-        public CategoryResult result;
+        public BrowseResult browse;
         public Session session;
         public string error;
     }
+
+    public class BrowseMoreResponse { public int added; public string liveSearched; public Session session; }
 
     public class Capabilities { public bool openai; public bool serpapi; public bool ikea; public string generator; }
     public class Health { public bool ok; public string baseUrl; public Capabilities capabilities; }

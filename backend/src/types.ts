@@ -37,7 +37,9 @@ export interface Product {
   storeLinkResolved?: boolean;
   dims?: Dims;
   dimsSource?: DimsSource;
-  colors?: string[];
+  colors?: string[];              // hex swatches (IKEA)
+  attrs?: ProductAttrs;            // normalized filter attributes (see inventory/attributes.ts)
+  description?: string;            // extra searchable text: product type, snippet, image alt text
   why?: string;                    // AI: why this fits the room
   fitScore?: number;               // 0..1 from ranking
   model: ModelInfo;
@@ -45,6 +47,45 @@ export interface Product {
   ikeaItemNo?: string;
   serpImmersiveToken?: string;
 }
+
+export interface ProductAttrs {
+  colors: string[];                // canonical color names: black, white, gray, beige, brown, ...
+  materials: string[];             // canonical: leather, velvet, wood, metal, ...
+  styles: string[];                // canonical: modern, mid-century, scandinavian, ...
+  colorFromImage?: boolean;        // colors guessed from the product photo (title had none)
+}
+
+/** Browse / filter state. Every field is optional; empty means "any". */
+export interface Filters {
+  category?: string;               // category key from catalog.ts
+  keywords?: string[];             // concrete features that must appear in the listing ("sleeper", "round")
+  colors?: string[];
+  materials?: string[];
+  styles?: string[];               // soft: boosts ranking, never excludes
+  stores?: string[];
+  minPrice?: number;
+  maxPrice?: number;
+  minRating?: number;
+  maxWidthM?: number;
+  maxDepthM?: number;
+  maxHeightM?: number;
+  only3d?: boolean;                // only products with an official (IKEA) 3D model
+  sort?: 'relevance' | 'price_asc' | 'price_desc' | 'rating';
+}
+
+export interface Facet { value: string; count: number }
+
+export interface BrowseResult {
+  filters: Filters;
+  productIds: string[];            // first page(s) of matches, best first
+  total: number;                   // total matches in the catalog
+  priceRange: { min: number; max: number; median: number } | null;
+  facets: { categories: Facet[]; colors: Facet[]; materials: Facet[]; stores: Facet[] };
+  liveSearched?: string;           // query sent to live stores because the catalog had too few matches
+  updatedAt: number;
+}
+
+export interface ChatTurn { role: 'user' | 'assistant'; text: string; at: number; via?: 'voice' | 'text' }
 
 export interface PaletteColor { hex: string; name: string }
 
@@ -119,4 +160,6 @@ export interface Session {
   cart: CartItem[];
   placements: Placement[];        // last layout the headset reported / received
   voice: { at: number; transcript: string; query: string }[];
+  browse?: BrowseResult;          // current catalog filter + results (voice or manual)
+  chat?: ChatTurn[];              // conversation with the shopping assistant (last ~20 turns)
 }

@@ -5,7 +5,11 @@ const MV_URL = 'https://ajax.googleapis.com/ajax/libs/model-viewer/4.0.0/model-v
 const MAX_PHOTOS = 12;
 const PROMPT_EXAMPLES = ['Cozy reading corner', 'Japandi living room, warm wood', 'Calm home office', 'Small bedroom, more storage'];
 const BUDGETS = [500, 1500, 3000];
-const ASK_EXAMPLES = ['A tall plant for the corner under $80', 'Warm floor lamp for reading', 'Walnut side table'];
+const ASK_EXAMPLES = ['Black leather sofa under $1,500', 'Anything cheaper?', 'What’s the price range?', 'Round wood coffee table', 'Add the first one to my cart'];
+const PRICE_PRESETS = [[0, 0, 'Any price'], [0, 200, 'Under $200'], [0, 500, 'Under $500'], [0, 1000, 'Under $1,000'], [0, 2000, 'Under $2,000'], [1000, 0, '$1,000+']];
+const SORTS = [['relevance', 'Best match'], ['price_asc', 'Price: low to high'], ['price_desc', 'Price: high to low'], ['rating', 'Top rated']];
+const COLOR_HEX = { black: '#1d1d1f', white: '#f7f7f5', gray: '#9a9aa0', beige: '#d9c8ad', brown: '#7b5234', blue: '#3a67c9', green: '#4f8a55', red: '#c0392b', pink: '#e8a0b4', yellow: '#e7c33f', orange: '#e07a2f', purple: '#8559b8', gold: '#c9a54a', silver: '#c7c9cc', multicolor: 'conic-gradient(#e74c3c, #f1c40f, #2ecc71, #3498db, #9b59b6, #e74c3c)' };
+const BROWSE_PAGE = 12;
 
 // ============================================================================ tiny helpers
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -117,6 +121,8 @@ const ICONS = {
   sofa: '<path d="M20 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v3"/><path d="M2 16a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-5a2 2 0 0 0-4 0v1.5a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5V11a2 2 0 0 0-4 0z"/><path d="M4 18v2M20 18v2"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
   arrowUp: '<path d="m5 12 7-7 7 7M12 19V5"/>',
+  mic: '<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M19 10a7 7 0 0 1-14 0M12 17v5M8 22h8"/>',
+  sliders: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
   arrowRight: '<path d="M5 12h14M12 5l7 7-7 7"/>',
   chevronLeft: '<path d="m15 18-6-6 6-6"/>',
   chevronRight: '<path d="m9 18 6-6-6-6"/>',
@@ -149,12 +155,17 @@ const state = {
   creating: false,
   session: null, // expanded session for the current route
   notFound: false,
-  searching: null, // text of the in-flight search
   inflight: 0, // cart mutations in flight (poll results are ignored meanwhile)
   cartOrder: new Map(), // productId -> first-seen order, keeps cart rows stable
   openStores: new Set(), // expanded "Buy at" lists in the cart
   modal: null, // { kind, pid, token }
   lastStatus: null,
+  catalog: null, // GET /api/catalog: size, vocab, shopping usage
+  asking: null, // text of the in-flight assistant turn
+  browseShown: BROWSE_PAGE, // how many browse results are rendered
+  filtersOpen: false,
+  focusId: null, // product the user last opened ("how much is this one?")
+  rec: null, // { recorder, chunks, stream } while the mic is on
 };
 
 // ============================================================================ API
@@ -290,7 +301,6 @@ function onRoute() {
     if (!prev.id || prev.id !== r.id) {
       if (state.session?.id !== r.id) state.session = null;
       state.notFound = false;
-      state.searching = null;
       state.lastStatus = state.session?.status ?? null;
     }
     if (r.name === 'session') viewSession();
@@ -762,25 +772,30 @@ function viewSession() {
     <div id="s-photos"></div>
     <div id="s-quest"></div>
     <div id="s-placed"></div>
-    <section class="card ask" aria-label="Ask for something specific">
+    <section class="card ask" aria-label="Shopping assistant">
+      <div id="chat" class="chat" aria-live="polite"></div>
       <form id="ask-form" autocomplete="off">
         <div class="ask-field">
           ${icon('sparkles')}
-          <input id="ask-input" name="q" type="text" enterkeyhint="search" maxlength="200" placeholder="Ask for anything…" aria-label="Ask for anything">
-          <button class="ask-go" type="submit" aria-label="Search">${icon('arrowUp')}</button>
+          <input id="ask-input" name="q" type="text" enterkeyhint="send" maxlength="300" placeholder="Ask or filter: “black leather sofa”…" aria-label="Ask the shopping assistant">
+          <button class="ask-mic" type="button" data-action="mic" aria-label="Speak" hidden>${icon('mic')}</button>
+          <button class="ask-go" type="submit" aria-label="Send">${icon('arrowUp')}</button>
         </div>
       </form>
-      <p class="ask-hint">e.g. “a tall plant for the corner under $80”</p>
       <div class="chips scroll">${ASK_EXAMPLES.map((t) => `<button type="button" class="chip" data-action="ask-example" data-value="${esc(t)}">${esc(t)}</button>`).join('')}</div>
     </section>
-    <div id="s-pending"></div>
+    <section id="s-browse" class="browse" aria-label="Browse the catalog"></section>
     <div id="s-cats" class="cats"></div>
     <div id="s-more"></div>
   `;
   $('#ask-form').addEventListener('submit', (e) => {
     e.preventDefault();
-    submitSearch($('#ask-input').value.trim());
+    submitAsk($('#ask-input').value.trim());
   });
+  // Voice needs a secure context (https or localhost) on iPhone; otherwise the keyboard's dictation key still works.
+  if (window.isSecureContext && navigator.mediaDevices?.getUserMedia && window.MediaRecorder) $('.ask-mic').hidden = false;
+  state.browseShown = BROWSE_PAGE;
+  loadCatalog();
   renderSession();
 }
 
@@ -793,13 +808,18 @@ function renderSession() {
   setHTML($('#s-photos'), s?.photos?.length ? photosHtml(s) : '');
   setHTML($('#s-quest'), questHtml(s?.id ?? (state.route.id !== 'latest' ? state.route.id : '')));
   setHTML($('#s-placed'), s ? placedHtml(s) : '');
-  setHTML($('#s-pending'), state.searching ? pendingHtml(state.searching) : '');
   const form = $('#ask-form');
   if (form) {
-    form.querySelector('input').disabled = !!state.searching;
-    form.querySelector('button').disabled = !!state.searching;
-    form.querySelector('button').innerHTML = state.searching ? '<span class="mini-spin"></span>' : icon('arrowUp');
+    const busy = !!state.asking;
+    form.querySelector('input').disabled = busy;
+    form.querySelector('.ask-go').disabled = busy;
+    form.querySelector('.ask-go').innerHTML = busy ? '<span class="mini-spin"></span>' : icon('arrowUp');
+    const mic = form.querySelector('.ask-mic');
+    mic.classList.toggle('on', !!state.rec);
+    mic.disabled = busy && !state.rec;
   }
+  renderChat(s);
+  renderBrowse(s);
   renderCats(s);
 }
 
@@ -914,13 +934,6 @@ function placedHtml(s) {
   </section>`;
 }
 
-function pendingHtml(text) {
-  return `<section class="cat pending-cat" aria-busy="true">
-    <div class="cat-head"><div class="cat-title"><h2><span class="mini-spin"></span> Searching stores…</h2></div><p class="cat-why">You asked: “${esc(text)}”</p></div>
-    <div class="row">${[0, 1, 2].map(() => '<div class="skel skel-card"></div>').join('')}</div>
-  </section>`;
-}
-
 function skeletonRows(n, label) {
   return `<div class="cats">${Array.from({ length: n }, (_, i) => `<section class="cat" aria-busy="true">
     <div class="cat-head">${i === 0 && label ? `<div class="cat-title"><h2 class="faint" style="font-size:16px;display:flex;gap:8px;align-items:center"><span class="mini-spin"></span>${esc(label)}</h2></div>` : '<div class="skel" style="height:22px;width:40%"></div>'}<div class="skel skel-line" style="width:70%"></div></div>
@@ -996,39 +1009,250 @@ function updateCard(card, p, inCart) {
     <div class="card-actions">
       <button type="button" class="btn btn-sm btn-soft btn-cart ${inCart ? 'in' : ''}" data-action="toggle-cart" data-id="${esc(p.id)}" aria-pressed="${inCart}">${icon('heart', inCart ? 'i-fill' : '')}${inCart ? 'In cart' : 'Add to cart'}</button>
       <div class="btn-pair">
-        <button type="button" class="btn btn-sm btn-secondary" data-action="view-3d" data-id="${esc(p.id)}">${icon('cube')}View in 3D</button>
+        <button type="button" class="btn btn-sm btn-secondary" data-action="view-3d" data-id="${esc(p.id)}">${icon('cube')}<span class="lbl-long">View in </span>3D</button>
         <a class="btn btn-sm btn-secondary" href="${esc(safeUrl(p.productUrl))}" target="_blank" rel="noopener noreferrer" aria-label="Open ${esc(p.store || 'store')} page">Store ${icon('external')}</a>
       </div>
     </div>`);
 }
 
-async function submitSearch(text) {
-  if (!text || state.searching) return;
+// ============================================================================ ASSISTANT + BROWSE
+async function loadCatalog() {
+  try { state.catalog = await api('/api/catalog'); } catch { state.catalog = null; }
+  if (state.route.name === 'session') renderSession();
+}
+
+function renderChat(s) {
+  const el = $('#chat');
+  if (!el) return;
+  const turns = (s?.chat ?? []).slice(-4);
+  const pending = state.asking ? [{ role: 'user', text: state.asking }, { role: 'assistant', text: '…', pending: true }] : [];
+  const all = [...turns, ...pending].slice(-4);
+  if (!all.length) {
+    const n = state.catalog?.total;
+    setHTML(el, `<p class="chat-intro">${icon('sparkles')}<span>Tell me what you’re after — “black leather sofa”, “under $800”, “what’s the cheapest?”, “add the second one”. ${n ? `I’ll search ${n.toLocaleString('en-US')} real pieces.` : ''}</span></p>`);
+    return;
+  }
+  setHTML(el, all.map((t) => `<div class="bubble ${t.role === 'user' ? 'me' : 'ai'}${t.pending ? ' pending' : ''}">${t.pending ? '<span class="mini-spin"></span>' : esc(t.text)}</div>`).join(''));
+}
+
+const facetLabel = (v) => cap(String(v).replace(/_/g, ' '));
+const catLabel = (key) => state.catalog?.vocab?.categories?.find((c) => c.key === key)?.label ?? facetLabel(key);
+
+function filterChips(f) {
+  const chips = [];
+  if (f.category) chips.push(['category', null, catLabel(f.category)]);
+  for (const c of f.colors ?? []) chips.push(['colors', c, cap(c)]);
+  for (const m of f.materials ?? []) chips.push(['materials', m, cap(m)]);
+  for (const st of f.styles ?? []) chips.push(['styles', st, cap(st)]);
+  for (const k of f.keywords ?? []) chips.push(['keywords', k, `“${k}”`]);
+  for (const st of f.stores ?? []) chips.push(['stores', st, st]);
+  if (f.minPrice || f.maxPrice) chips.push(['price', null, f.minPrice && f.maxPrice ? `${money(f.minPrice)}–${money(f.maxPrice)}` : f.maxPrice ? `Under ${money(f.maxPrice)}` : `${money(f.minPrice)}+`]);
+  if (f.minRating) chips.push(['minRating', null, `${f.minRating}★+`]);
+  if (f.maxWidthM || f.maxDepthM || f.maxHeightM) chips.push(['size', null, 'Size limit']);
+  if (f.only3d) chips.push(['only3d', null, 'Official 3D']);
+  return chips;
+}
+
+function renderBrowse(s) {
+  const el = $('#s-browse');
+  if (!el) return;
+  const b = s?.browse;
+  const f = b?.filters ?? {};
+  const cat = state.catalog;
+  const facets = b?.facets;
+  const chips = filterChips(f);
+  const head = b
+    ? `<h2>${b.total.toLocaleString('en-US')} ${b.total === 1 ? 'match' : 'matches'}</h2>${b.priceRange ? `<span class="faint">${money(b.priceRange.min)} – ${money(b.priceRange.max)}</span>` : ''}`
+    : `<h2>Browse the catalog</h2>${cat?.total ? `<span class="faint">${cat.total.toLocaleString('en-US')} pieces · ${cat.stores} store${cat.stores === 1 ? '' : 's'}</span>` : ''}`;
+
+  const catOptions = (cat?.vocab?.categories ?? []).map((c) => `<option value="${esc(c.key)}" ${f.category === c.key ? 'selected' : ''}>${esc(c.label)}</option>`).join('');
+  const pricePreset = PRICE_PRESETS.findIndex(([lo, hi]) => (lo || 0) === (f.minPrice || 0) && (hi || 0) === (f.maxPrice || 0));
+  const facetRow = (kind, items) => (items?.length ? `<div class="facet"><h3 class="mini-title">${kind}</h3><div class="chips">${items.join('')}</div></div>` : '');
+  const colorChips = (facets?.colors ?? []).slice(0, 12).map((x) => `<button type="button" class="chip chip-color ${f.colors?.includes(x.value) ? 'active' : ''}" data-action="facet" data-kind="colors" data-value="${esc(x.value)}"><i style="background:${COLOR_HEX[x.value] ?? '#ccc'}"></i>${esc(cap(x.value))} <span class="n">${x.count}</span></button>`);
+  const matChips = (facets?.materials ?? []).slice(0, 12).map((x) => `<button type="button" class="chip ${f.materials?.includes(x.value) ? 'active' : ''}" data-action="facet" data-kind="materials" data-value="${esc(x.value)}">${esc(cap(x.value))} <span class="n">${x.count}</span></button>`);
+  const storeChips = (facets?.stores ?? []).slice(0, 10).map((x) => `<button type="button" class="chip ${f.stores?.includes(x.value.toLowerCase()) ? 'active' : ''}" data-action="facet" data-kind="stores" data-value="${esc(x.value.toLowerCase())}">${esc(x.value)} <span class="n">${x.count}</span></button>`);
+
+  const panel = `<div class="filters" ${state.filtersOpen ? '' : 'hidden'}>
+      <div class="filter-grid">
+        <label class="field"><span>Category</span><select data-filter="category"><option value="">All furniture</option>${catOptions}</select></label>
+        <label class="field"><span>Sort</span><select data-filter="sort">${SORTS.map(([v, l]) => `<option value="${v}" ${(f.sort ?? 'relevance') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        <label class="field"><span>Min $</span><input type="number" inputmode="numeric" min="0" step="10" data-filter="minPrice" value="${f.minPrice ?? ''}" placeholder="0"></label>
+        <label class="field"><span>Max $</span><input type="number" inputmode="numeric" min="0" step="10" data-filter="maxPrice" value="${f.maxPrice ?? ''}" placeholder="Any"></label>
+      </div>
+      <div class="chips">${PRICE_PRESETS.map(([lo, hi, l], i) => `<button type="button" class="chip ${i === pricePreset ? 'active' : ''}" data-action="price-preset" data-lo="${lo}" data-hi="${hi}">${l}</button>`).join('')}</div>
+      ${facetRow('Color', colorChips)}
+      ${facetRow('Material', matChips)}
+      ${facetRow('Store', storeChips)}
+      <label class="toggle"><input type="checkbox" data-filter="only3d" ${f.only3d ? 'checked' : ''}><span>Only items with official 3D models</span></label>
+    </div>`;
+
+  const shownIds = (b?.productIds ?? []).slice(0, state.browseShown);
+  const thin = b && b.total < 6 && (f.category || f.keywords?.length);
+  const liveLeft = cat?.shopping?.liveLeft ?? 0;
+  const foot = !b ? `<div class="inline-empty">Ask above, or open <b>Filters</b> to browse ${cat?.total ? cat.total.toLocaleString('en-US') : 'real'} pieces.</div>`
+    : `${b.productIds.length > state.browseShown ? `<button type="button" class="btn btn-secondary btn-block" data-action="browse-more">Show more</button>` : ''}
+       ${b.total > b.productIds.length && b.productIds.length <= state.browseShown ? `<p class="faint center">Showing the best ${b.productIds.length} of ${b.total.toLocaleString('en-US')}. Narrow it down to see the rest.</p>` : ''}
+       ${thin ? `<div class="inline-empty">${b.total ? 'Only a few matches in the catalog.' : 'Nothing in the catalog matches.'} <button type="button" class="btn btn-sm btn-soft" data-action="search-stores">${icon('search')} Search stores for more</button>${cat?.shopping?.provider !== 'none' ? `<div class="faint" style="margin-top:6px;font-size:12px">${liveLeft} live searches left this month</div>` : '<div class="faint" style="margin-top:6px;font-size:12px">IKEA only (no Google Shopping key)</div>'}</div>` : ''}
+       ${b.liveSearched ? `<p class="faint center">Also searched stores for “${esc(b.liveSearched)}”.</p>` : ''}`;
+
+  if (!el.querySelector(':scope > .browse-top')) {
+    el.innerHTML = `<div class="browse-top"></div><div class="browse-chips"></div><div class="browse-panel"></div><div class="browse-grid" role="list"></div><div class="browse-foot"></div>`;
+  }
+  setHTML(el.querySelector('.browse-top'), `<div class="browse-head">${head}</div>
+    <button type="button" class="btn btn-sm ${state.filtersOpen ? 'btn-soft' : 'btn-secondary'}" data-action="toggle-filters" aria-expanded="${state.filtersOpen}">${icon('sliders')} Filters${chips.length ? ` <span class="count">${chips.length}</span>` : ''}</button>`);
+  setHTML(el.querySelector('.browse-chips'), chips.length ? `<div class="chips">${chips.map(([k, v, l]) => `<button type="button" class="chip active" data-action="unfilter" data-kind="${k}" data-value="${esc(v ?? '')}">${esc(l)} ${icon('x')}</button>`).join('')}<button type="button" class="chip" data-action="clear-filters">Clear all</button></div>` : '');
+  // Don't rebuild the panel while the user is typing a price (would steal focus); dropdowns/chips are fine.
+  const panelEl = el.querySelector('.browse-panel');
+  const typing = document.activeElement?.tagName === 'INPUT' && document.activeElement.type === 'number' && panelEl.contains(document.activeElement);
+  if (!typing) setHTML(panelEl, panel);
+  const grid = el.querySelector('.browse-grid');
+  const cart = new Set((s?.cart ?? []).map((c) => c.productId));
+  patchList(grid, shownIds.filter((id) => s.products?.[id]), (id) => id, (card, id) => updateCard(card, s.products[id], cart.has(id)), createCard);
+  setHTML(el.querySelector('.browse-foot'), foot);
+}
+
+let filterTimer = 0;
+function currentFilters() {
+  return { ...(state.session?.browse?.filters ?? {}) };
+}
+
+async function applyFilters(f, { debounce = 0 } = {}) {
+  const s = state.session;
+  if (!s) return;
+  clearTimeout(filterTimer);
+  // Optimistic: show the chips right away, results follow.
+  s.browse = { ...(s.browse ?? { productIds: [], total: 0, priceRange: null, facets: null }), filters: f };
+  state.browseShown = BROWSE_PAGE;
+  renderSession();
+  filterTimer = setTimeout(async () => {
+    try {
+      state.inflight++;
+      const d = await api(`/api/sessions/${encodeURIComponent(s.id)}/browse`, { method: 'PUT', body: { filters: f } });
+      state.inflight--;
+      if (state.inflight === 0) applySession(d);
+    } catch (e) {
+      state.inflight--;
+      toast(e.message || 'Couldn’t filter.', { type: 'error' });
+    }
+  }, debounce);
+}
+
+function toggleFacet(kind, value) {
+  const f = currentFilters();
+  const cur = new Set(f[kind] ?? []);
+  if (cur.has(value)) cur.delete(value); else cur.add(value);
+  f[kind] = [...cur];
+  if (!f[kind].length) delete f[kind];
+  applyFilters(f);
+}
+
+function removeFilter(kind, value) {
+  const f = currentFilters();
+  if (kind === 'price') { delete f.minPrice; delete f.maxPrice; }
+  else if (kind === 'size') { delete f.maxWidthM; delete f.maxDepthM; delete f.maxHeightM; }
+  else if (Array.isArray(f[kind])) { f[kind] = f[kind].filter((x) => x !== value); if (!f[kind].length) delete f[kind]; }
+  else delete f[kind];
+  applyFilters(f);
+}
+
+document.addEventListener('change', (e) => {
+  const t = e.target.closest('[data-filter]');
+  if (!t) return;
+  const f = currentFilters();
+  const k = t.dataset.filter;
+  if (k === 'only3d') { if (t.checked) f.only3d = true; else delete f.only3d; }
+  else if (k === 'minPrice' || k === 'maxPrice') { const v = Number(t.value); if (v > 0) f[k] = v; else delete f[k]; }
+  else if (t.value) f[k] = t.value;
+  else delete f[k];
+  applyFilters(f, { debounce: k.endsWith('Price') ? 300 : 0 });
+});
+
+async function searchStores() {
+  const s = state.session;
+  if (!s || state.asking) return;
+  state.asking = 'Search stores for more';
+  renderSession();
+  try {
+    const d = await api(`/api/sessions/${encodeURIComponent(s.id)}/browse/more`, { method: 'POST', body: {} });
+    state.asking = null;
+    applySession(d.session);
+    loadCatalog();
+    toast(d.added > 0 ? `Found ${d.added} more from stores.` : d.liveSearched ? 'Checked stores; nothing new matched.' : 'Already searched stores for this (or the monthly limit is reached).', { type: d.added > 0 ? 'success' : 'info' });
+  } catch (e) {
+    state.asking = null;
+    renderSession();
+    toast(e.message || 'Store search failed.', { type: 'error' });
+  }
+}
+
+function handleAssistant(d) {
+  if (d?.session) applySession(d.session);
+  state.browseShown = BROWSE_PAGE;
+  const pid = d?.productId;
+  if (pid) state.focusId = pid;
+  if ((d?.action === 'open' || d?.action === 'place') && pid) open3D(pid);
+  else if (d?.browse) requestAnimationFrame(() => $('#s-browse')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  if (d?.action === 'place') toast('Put on your Quest to place it in your room.', { type: 'info' });
+}
+
+async function submitAsk(text) {
+  if (!text || state.asking) return;
   const s = state.session;
   const id = s?.id ?? state.route.id;
   if (!id || id === 'latest') return;
-  state.searching = text;
+  state.asking = text;
+  const input = $('#ask-input');
+  if (input) { input.value = ''; input.blur(); }
   renderSession();
-  $('#s-pending')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   try {
-    const d = await api(`/api/sessions/${encodeURIComponent(id)}/search`, { method: 'POST', body: { text } });
-    state.searching = null;
-    const input = $('#ask-input');
-    if (input) { input.value = ''; input.blur(); }
-    if (d?.session) applySession(d.session);
-    else renderSession();
-    const n = d?.result?.productIds?.length ?? 0;
-    if (!n) toast('No matches found. Try different words.', { type: 'warn' });
-    else toast(d.intent?.reply || `Found ${n} options.`, { type: 'success' });
-    if (d?.result && state.route.name === 'session') {
-      const key = catKey(d.result);
-      requestAnimationFrame(() => [...document.querySelectorAll('#s-cats > .cat')].find((x) => x.dataset.key === key)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
-    }
+    const d = await api(`/api/sessions/${encodeURIComponent(id)}/ask`, { method: 'POST', body: { text, focusProductId: state.focusId || undefined } });
+    state.asking = null;
+    handleAssistant(d);
   } catch (e) {
-    state.searching = null;
+    state.asking = null;
     renderSession();
-    toast(e.message || 'Search failed.', { type: 'error' });
+    toast(e.message || 'The assistant didn’t answer.', { type: 'error' });
   }
+}
+
+async function toggleMic() {
+  if (state.rec) { state.rec.recorder.stop(); return; }
+  const s = state.session;
+  if (!s || state.asking) return;
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch { toast('Microphone blocked. Allow it in Settings, or use the keyboard’s dictation key.', { type: 'error' }); return; }
+  const type = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'].find((t) => MediaRecorder.isTypeSupported?.(t)) ?? '';
+  const recorder = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
+  const chunks = [];
+  recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+  recorder.onstop = async () => {
+    stream.getTracks().forEach((t) => t.stop());
+    state.rec = null;
+    const blob = new Blob(chunks, { type: recorder.mimeType || type || 'audio/webm' });
+    if (blob.size < 2000) { renderSession(); toast('Tap the mic, speak, then tap again.', { type: 'info' }); return; }
+    state.asking = '🎙️ …';
+    renderSession();
+    const form = new FormData();
+    form.append('audio', blob, /mp4/.test(blob.type) ? 'speech.m4a' : 'speech.webm');
+    if (state.focusId) form.append('focusProductId', state.focusId);
+    try {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(s.id)}/voice`, { method: 'POST', body: form });
+      const d = await res.json().catch(() => null);
+      state.asking = null;
+      if (!res.ok) throw new Error(d?.error || `Voice failed (${res.status})`);
+      if (!d?.transcript) { renderSession(); toast(d?.reply || 'Didn’t catch that.', { type: 'info' }); return; }
+      handleAssistant(d);
+    } catch (e) {
+      state.asking = null;
+      renderSession();
+      toast(e.message || 'Voice failed.', { type: 'error' });
+    }
+  };
+  state.rec = { recorder, chunks, stream };
+  recorder.start();
+  renderSession();
+  setTimeout(() => { if (state.rec?.recorder === recorder) recorder.stop(); }, 15000);
 }
 
 // ============================================================================ CART
@@ -1410,7 +1634,7 @@ document.addEventListener('click', (e) => {
     case 'demo': demo(); break;
     case 'retry-recent': loadRecent(); break;
     case 'toggle-cart': toggleCart(id); break;
-    case 'view-3d': if (id) open3D(id); break;
+    case 'view-3d': if (id) { state.focusId = id; open3D(id); } break;
     case 'retry-model': {
       const p = product(id) ?? state.modal?.product;
       if (p && state.modal) prepareAndShow({ ...p, model: { status: 'none' } }, state.modal.token);
@@ -1422,12 +1646,22 @@ document.addEventListener('click', (e) => {
       row?.scrollBy({ left: Number(t.dataset.dir) * row.clientWidth * 0.85, behavior: 'smooth' });
       break;
     }
-    case 'ask-example': {
-      const input = $('#ask-input');
-      if (input) input.value = t.dataset.value;
-      submitSearch(t.dataset.value);
+    case 'ask-example': submitAsk(t.dataset.value); break;
+    case 'mic': toggleMic(); break;
+    case 'toggle-filters': state.filtersOpen = !state.filtersOpen; renderSession(); break;
+    case 'facet': toggleFacet(t.dataset.kind, t.dataset.value); break;
+    case 'unfilter': removeFilter(t.dataset.kind, t.dataset.value); break;
+    case 'clear-filters': applyFilters({}); break;
+    case 'price-preset': {
+      const f = currentFilters();
+      const lo = Number(t.dataset.lo), hi = Number(t.dataset.hi);
+      if (lo) f.minPrice = lo; else delete f.minPrice;
+      if (hi) f.maxPrice = hi; else delete f.maxPrice;
+      applyFilters(f);
       break;
     }
+    case 'browse-more': state.browseShown += BROWSE_PAGE; renderSession(); break;
+    case 'search-stores': searchStores(); break;
     case 'copy-code': copyCode(t.dataset.code); break;
     case 'open-photo': openPhoto(t.dataset.src); break;
     case 'close-modal': closeModal(); break;

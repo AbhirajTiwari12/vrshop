@@ -3,6 +3,13 @@ import { BROWSER_UA, fetchJson, fetchWithTimeout } from '../util/http.js';
 import { log, errMsg } from '../util/log.js';
 import type { Dims, Product } from '../types.js';
 import { round3 } from '../catalog.js';
+import { extractAttributes, extractColors } from '../inventory/attributes.js';
+
+/** The variant name in the title ("Grann/Bomstad golden brown") is the most precise; IKEA's color tags are the fallback. */
+function colorsOf(title: string, colors: { name: string }[] | undefined): string[] {
+  const fromTitle = extractColors(title.split(',').slice(1).join(','));
+  return [...new Set(fromTitle.length ? fromTitle : (colors ?? []).flatMap((c) => extractColors(String(c.name))))];
+}
 
 // IKEA's public (unofficial) search API. No key, CORS *, returns price/images/rating.
 // Official true-scale GLBs live at web-api.ikea.com/.../rotera/static/models/{itemNo}-mini.glb and
@@ -12,9 +19,10 @@ import { round3 } from '../catalog.js';
 const { country, lang } = config.ikea;
 
 export async function searchIkea(query: string, size = 12): Promise<Product[]> {
+  // size can go up to the whole result set (hundreds) in one free call; there is no pagination.
   const url = `https://sik.search.blue.cdtapps.com/${country}/${lang}/search-result-page?q=${encodeURIComponent(query)}&size=${size}&types=PRODUCT`;
   try {
-    const data = await fetchJson<any>(url, { timeoutMs: 12000, retries: 1, headers: { 'User-Agent': BROWSER_UA } });
+    const data = await fetchJson<any>(url, { timeoutMs: size > 60 ? 30000 : 12000, retries: 1, headers: { 'User-Agent': BROWSER_UA } });
     const items: any[] = data?.searchResultPage?.products?.main?.items ?? [];
     return items
       .map((it) => it?.product)
@@ -23,11 +31,15 @@ export async function searchIkea(query: string, size = 12): Promise<Product[]> {
         const price = typeof p.salesPrice?.numeral === 'number' ? p.salesPrice.numeral : null;
         const currency = p.salesPrice?.currencyCode ?? 'USD';
         const images: string[] = (p.allProductImage ?? []).map((i: any) => i.url).filter(Boolean);
+        const title = `${p.name} ${p.typeName}${p.validDesignText ? `, ${p.validDesignText}` : ''}`;
+        // Type + category path + product-photo alt text ("sleek design with sturdy black metal legs") feed classification
+        // and filters. The room-scene alt text is skipped: it describes neighbouring furniture.
+        const description = [p.typeName, (p.categoryPath ?? []).map((c: any) => c.name).join(' > '), p.mainImageAlt].filter(Boolean).join(' | ');
         return {
           id: `ikea-${p.itemNo}`,
           source: 'ikea',
           store: 'IKEA',
-          title: `${p.name} ${p.typeName}${p.validDesignText ? `, ${p.validDesignText}` : ''}`,
+          title,
           brand: 'IKEA',
           category: '',
           price,
@@ -40,6 +52,9 @@ export async function searchIkea(query: string, size = 12): Promise<Product[]> {
           productUrl: p.pipUrl,
           storeLinkResolved: true,
           colors: (p.colors ?? []).map((c: any) => `#${c.hex}`),
+          description,
+          // Colors from the variant name / IKEA's tags only (alt text mentions leg and cushion colors too).
+          attrs: { ...extractAttributes(`${title} ${description}`, (p.colors ?? []).map((c: any) => String(c.name))), colors: colorsOf(title, p.colors) },
           model: { status: 'none' },
           ikeaItemNo: String(p.itemNo),
         };

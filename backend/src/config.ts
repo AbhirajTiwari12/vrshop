@@ -23,6 +23,18 @@ function pickGenProvider(): GenProvider {
   return 'none';
 }
 
+export type ShoppingProvider = 'serper' | 'serpapi' | 'none';
+
+function pickShoppingProvider(): ShoppingProvider {
+  const wanted = env('SHOPPING_PROVIDER', 'auto').toLowerCase();
+  const has = { serper: !!env('SERPER_API_KEY'), serpapi: !!env('SERPAPI_KEY') };
+  if (wanted === 'none') return 'none';
+  if (wanted === 'serper' || wanted === 'serpapi') return has[wanted] ? wanted : 'none';
+  if (has.serper) return 'serper'; // 2,500 free queries, then ~$1 / 1k
+  if (has.serpapi) return 'serpapi'; // 250 free / month, then ~$15-25 / 1k
+  return 'none';
+}
+
 export const config = {
   port: Number(env('PORT', '8787')),
   publicBaseUrl: env('PUBLIC_BASE_URL').replace(/\/$/, ''),
@@ -34,6 +46,15 @@ export const config = {
     baseUrl: env('OPENAI_BASE_URL', 'https://api.openai.com/v1').replace(/\/$/, ''),
   },
   serpapiKey: env('SERPAPI_KEY'),
+  serperKey: env('SERPER_API_KEY'),
+  shopping: {
+    provider: pickShoppingProvider(),
+    // Voice/typed questions search live stores only when the pulled catalog has fewer matches than this.
+    liveMode: (env('LIVE_SEARCH', 'fallback').toLowerCase() === 'off' ? 'off' : 'fallback') as 'off' | 'fallback',
+    liveMinResults: Number(env('LIVE_MIN_RESULTS', '6')),
+    // Hard stop for live Google Shopping calls per calendar month (the bulk pull is counted too).
+    monthlyLiveLimit: Number(env('SHOPPING_MONTHLY_LIMIT', '200')),
+  },
   ikea: { country: env('IKEA_COUNTRY', 'us'), lang: env('IKEA_LANG', 'en') },
   gen: {
     provider: pickGenProvider(),
@@ -61,7 +82,8 @@ export function baseUrl(): string {
 export function capabilities() {
   return {
     openai: !!config.openai.key,
-    serpapi: !!config.serpapiKey,
+    serpapi: config.shopping.provider !== 'none', // "Google Shopping available" (via Serper.dev or SerpAPI)
+    shopping: config.shopping.provider,
     ikea: true,
     generator: config.gen.provider,
   };
