@@ -77,6 +77,54 @@ export async function transcribe(audio: Buffer, filename = 'speech.wav'): Promis
   return (JSON.parse(text).text ?? '').trim();
 }
 
+/**
+ * Text to speech for the designer's voice. Asks OpenAI for raw 24 kHz 16-bit mono PCM and wraps it in a WAV header
+ * ourselves, so the file is exact and trivially decodable (Unity parses it without a codec; browsers play it too).
+ * Falls back to tts-1 if the configured model is unavailable.
+ */
+export async function synthesizeSpeech(text: string): Promise<Buffer> {
+  if (!config.openai.key) throw new Error('OPENAI_API_KEY not set');
+  const models = [config.openai.ttsModel, 'tts-1'].filter((m, i, a) => m && a.indexOf(m) === i);
+  let lastErr = '';
+  for (const model of models) {
+    const body: Record<string, unknown> = { model, voice: config.openai.ttsVoice, input: text.slice(0, 1200), response_format: 'pcm' };
+    if (!/^tts-1/.test(model) && config.openai.ttsInstructions) body.instructions = config.openai.ttsInstructions;
+    const res = await fetchWithTimeout(`${config.openai.baseUrl}/audio/speech`, {
+      method: 'POST',
+      timeoutMs: 30000,
+      headers: { Authorization: `Bearer ${config.openai.key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) {
+      const pcm = Buffer.from(await res.arrayBuffer());
+      log.info('openai', `speech via ${model} (${text.length} chars, ${(pcm.length / 48000).toFixed(1)} s)`);
+      return wavFromPcm16(pcm, 24000);
+    }
+    lastErr = `${res.status}: ${(await res.text()).slice(0, 300)}`;
+    if (res.status === 401 || res.status === 429) break; // same key/quota for every model
+  }
+  throw new Error(`OpenAI speech ${lastErr}`);
+}
+
+/** Canonical 44-byte WAV header around 16-bit little-endian mono PCM. */
+export function wavFromPcm16(pcm: Buffer, sampleRate: number): Buffer {
+  const h = Buffer.alloc(44);
+  h.write('RIFF', 0);
+  h.writeUInt32LE(36 + pcm.length, 4);
+  h.write('WAVE', 8);
+  h.write('fmt ', 12);
+  h.writeUInt32LE(16, 16);
+  h.writeUInt16LE(1, 20); // PCM
+  h.writeUInt16LE(1, 22); // mono
+  h.writeUInt32LE(sampleRate, 24);
+  h.writeUInt32LE(sampleRate * 2, 28);
+  h.writeUInt16LE(2, 32);
+  h.writeUInt16LE(16, 34);
+  h.write('data', 36);
+  h.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([h, pcm]);
+}
+
 function mimeFor(name: string) {
   const ext = path.extname(name).toLowerCase();
   return ext === '.mp3' ? 'audio/mpeg' : ext === '.m4a' ? 'audio/mp4' : ext === '.webm' ? 'audio/webm' : 'audio/wav';

@@ -12,6 +12,7 @@ export const dirs = {
   models: path.join(DATA_DIR, 'models'),
   raw: path.join(DATA_DIR, 'raw'),
   img: path.join(DATA_DIR, 'img'),
+  tts: path.join(DATA_DIR, 'tts'),
 };
 for (const d of [DATA_DIR, ...Object.values(dirs)]) fs.mkdirSync(d, { recursive: true });
 

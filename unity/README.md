@@ -87,7 +87,17 @@ Change the backend URL later without rebuilding: set it in the window and click 
 | Right (or left) thumbstick ← → | rotate the selected item |
 | **A** | show / hide the catalog in front of you |
 | **B** | delete the selected item |
-| hold **X** | voice search: "a tall plant for this corner under 80 dollars" (point where it should go) |
+| hold **X** | talk to your designer: "a tall plant for this corner under 80 dollars" (point where it should go) |
+| point at the **orb** + trigger | talk without holding anything — it stops listening when you pause; tap it while it speaks to interrupt |
+
+**Your designer (the orb).** A small pearl orb floats at the lower left of your view. It breathes while idle, glows
+gold and ripples with your voice while listening, turns rose with a spinning brass arc while thinking, and pulses as it
+speaks. Replies are spoken (OpenAI text to speech via the backend, cached in `backend/data/tts`) and captioned in the
+bubble beside it. Without `OPENAI_API_KEY` the captions still appear, just without the voice.
+
+**The showroom (A).** Three tabs: *For you* (the designer's picks for your room, one category chip at a time),
+*Browse* (the whole catalog; filter chips open drop-down menus) and *Bag* (budget + "Buy the room with Visa").
+Cards open a detail view with *Place in my room* / *Add to bag*.
 
 The footprint outline turns **red** when an item collides with real furniture, other items, goes past a wall or blocks a door;
 the tag also warns if it may not fit through your door for delivery.
@@ -112,8 +122,10 @@ Scripts/Room/RoomService.cs          Space Setup via MRUK → colliders, occlude
 Scripts/Rendering/                   passthrough (MR), room-matched lighting, materials
 Scripts/Furniture/                   placing items, glTFast loading, ghost → model swap, layout animation
 Scripts/Interaction/                 controller laser, drag/rotate/wall-snap, fit check
-Scripts/UI/                          code-built world-space UI: catalog, item tags, toasts
-Scripts/Voice/VoiceCommand.cs        hold-X voice search (mic → backend → OpenAI)
+Scripts/UI/                          code-built world-space UI: Theme (colors + fonts), UIKit, catalog, filter menus, item tags, toasts
+Scripts/Assistant/AssistantOrb.cs    the designer orb: listening / thinking / speaking states, captions, spoken replies
+Scripts/Voice/                       hold-X or tap-the-orb voice (mic → backend → OpenAI), WAV encode/decode
+Fonts/                               Inter + DM Serif Display (SIL OFL); VRShop > Rebuild UI Fonts bakes them into Resources/VRShopFonts
 Shaders/                             shadow catcher, depth occluder, contact-shadow blob, ghost
 Editor/                              package installer, setup window, project configurator, scene builder
 ```

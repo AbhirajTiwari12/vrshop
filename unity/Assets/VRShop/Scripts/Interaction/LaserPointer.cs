@@ -16,7 +16,7 @@ namespace VRShop.Interaction
         public Hand hand = Hand.Right;
         public float maxDistance = 12f;
         public Color idleColor = new Color(1f, 1f, 1f, 0.35f);
-        public Color activeColor = new Color(0.45f, 0.75f, 1f, 0.9f);
+        public Color activeColor = new Color(0.96f, 0.84f, 0.62f, 0.95f); // warm champagne, matches the UI's brass
 
         public bool HasHit { get; private set; }
         public RaycastHit Hit { get; private set; }

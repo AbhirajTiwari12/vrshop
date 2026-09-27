@@ -23,7 +23,7 @@ walk around them, check they fit, let AI arrange the room, and check out with st
 | Folder | What |
 |---|---|
 | [`backend/`](backend) | Node/TypeScript API: room analysis, product search, 3D model pipeline, layout solver, voice, image proxy. Also serves the phone web app. |
-| [`backend/public/`](backend/public) | Phone companion web app (capture, recommendations, 3D preview, cart). |
+| [`backend/public/`](backend/public) | **Optional** phone companion web app: photograph your room so the AI can read its style, and review the cart. The headset works without it: with no scan yet it starts from a sample living room, and everything else (browsing, the talking designer, placing, checkout) happens in the headset. |
 | [`unity/`](unity) | Quest 2 app for Unity 6000.3.13f1 — see [`unity/README.md`](unity/README.md) for the step-by-step setup. |
 | [`docs/VISA.md`](docs/VISA.md) | **Visa track:** AI agent checkout ("buy the room") on Visa Acceptance + Trusted Agent Protocol, mandates, budget coach, tamper demo, setup and demo script. |
 | [`docs/PLAN.md`](docs/PLAN.md) | The full plan: architecture decisions, research, 3-day schedule, demo script, LiDAR upgrade path. |

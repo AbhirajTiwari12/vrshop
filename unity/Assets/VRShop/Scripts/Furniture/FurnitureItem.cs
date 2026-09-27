@@ -70,7 +70,7 @@ namespace VRShop.Furniture
             m_Ghost.name = "Ghost";
             m_Ghost.transform.SetParent(m_Visual, false);
             var r = m_Ghost.GetComponent<MeshRenderer>();
-            r.sharedMaterial = VRShopMaterials.Instance(VRShopMaterials.UnlitTransparent, new Color(0.55f, 0.75f, 1f, 0.22f));
+            r.sharedMaterial = VRShopMaterials.Instance(VRShopMaterials.UnlitTransparent, new Color(0.88f, 0.76f, 0.56f, 0.24f)); // warm brass ghost
             r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
         }
 

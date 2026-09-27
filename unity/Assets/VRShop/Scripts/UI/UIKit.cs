@@ -7,50 +7,62 @@ using VRShop.Interaction;
 
 namespace VRShop.UI
 {
+    public enum ButtonStyle
+    {
+        Primary,    // charcoal, the one main action on a view
+        Secondary,  // warm stone
+        Ghost,      // text only until hovered
+        Chip,       // pill; ink when selected
+        Nav,        // top navigation; ink text + brass underline when selected
+        Visa,       // payment approval
+        Card,       // white product card that lifts on hover
+        Round,      // circular white arrow button
+    }
+
     /// <summary>
     /// Code-built world-space UI (no prefabs to wire up in the editor). Coordinates are pixels from the
-    /// top-left of the parent; a canvas maps pixels to meters with its scale.
+    /// top-left of the parent; a canvas maps pixels to meters with its scale. Colors and fonts come from Theme.
     /// </summary>
     public static class UIKit
     {
-        public static readonly Color Bg = new Color(0.075f, 0.08f, 0.1f, 0.94f);
-        public static readonly Color Card = new Color(0.15f, 0.16f, 0.19f, 1f);
-        public static readonly Color CardHover = new Color(0.22f, 0.24f, 0.29f, 1f);
-        public static readonly Color ButtonBg = new Color(0.2f, 0.215f, 0.25f, 1f);
-        public static readonly Color ButtonBgHover = new Color(0.3f, 0.32f, 0.37f, 1f);
-        public static readonly Color Accent = new Color(0.33f, 0.6f, 1f, 1f);
-        public static readonly Color AccentHover = new Color(0.45f, 0.7f, 1f, 1f);
-        public static readonly Color TextColor = new Color(0.96f, 0.97f, 0.98f, 1f);
-        public static readonly Color Muted = new Color(0.66f, 0.69f, 0.74f, 1f);
-        public static readonly Color Good = new Color(0.4f, 0.88f, 0.58f, 1f);
-        public static readonly Color Warn = new Color(1f, 0.72f, 0.3f, 1f);
-        public static readonly Color Bad = new Color(1f, 0.42f, 0.38f, 1f);
+        const int k_SpriteRadius = 48;   // corner radius baked into the Rounded sprite (px); Image scales it
+        const int k_ShadowInset = 44;    // falloff width baked into the Shadow sprite (px)
 
-        static Sprite s_Rounded;
+        static Sprite s_Rounded, s_Shadow, s_Circle;
 
-        /// <summary>9-sliced white rounded rectangle generated at runtime (no texture assets needed).</summary>
-        public static Sprite Rounded
+        /// <summary>9-sliced white rounded rectangle generated at runtime (radius set per Image).</summary>
+        public static Sprite Rounded => s_Rounded != null ? s_Rounded : s_Rounded = MakeSprite("Rounded", 128, k_SpriteRadius + 2, (x, y, n) =>
         {
-            get
-            {
-                if (s_Rounded != null) return s_Rounded;
-                const int n = 64, r = 18;
-                var tex = new Texture2D(n, n, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Bilinear, name = "Rounded" };
-                var px = new Color32[n * n];
-                for (var y = 0; y < n; y++)
-                for (var x = 0; x < n; x++)
-                {
-                    var cx = Mathf.Clamp(x + 0.5f, r, n - r);
-                    var cy = Mathf.Clamp(y + 0.5f, r, n - r);
-                    var d = Vector2.Distance(new Vector2(x + 0.5f, y + 0.5f), new Vector2(cx, cy));
-                    var a = Mathf.Clamp01(r - d + 0.5f);
-                    px[y * n + x] = new Color32(255, 255, 255, (byte)(a * 255));
-                }
-                tex.SetPixels32(px);
-                tex.Apply(false, true);
-                s_Rounded = Sprite.Create(tex, new UnityEngine.Rect(0, 0, n, n), new Vector2(0.5f, 0.5f), 100, 0, SpriteMeshType.FullRect, new Vector4(r + 2, r + 2, r + 2, r + 2));
-                return s_Rounded;
-            }
+            var c = Mathf.Clamp(x, k_SpriteRadius, n - k_SpriteRadius);
+            var d = Mathf.Clamp(y, k_SpriteRadius, n - k_SpriteRadius);
+            return Mathf.Clamp01(k_SpriteRadius - Vector2.Distance(new Vector2(x, y), new Vector2(c, d)) + 0.5f);
+        });
+
+        /// <summary>Soft drop shadow: a blurred rounded rectangle whose inner edge is k_ShadowInset px in.</summary>
+        public static Sprite ShadowSprite => s_Shadow != null ? s_Shadow : s_Shadow = MakeSprite("Shadow", 128, 60, (x, y, n) =>
+        {
+            const float r = 12f, half = 64 - k_ShadowInset;
+            var q = new Vector2(Mathf.Max(Mathf.Abs(x - 64) - (half - r), 0), Mathf.Max(Mathf.Abs(y - 64) - (half - r), 0));
+            var d = q.magnitude - r;
+            var t = Mathf.Max(d, 0) / 20f;
+            return Mathf.Exp(-t * t);
+        });
+
+        /// <summary>Anti-aliased disc.</summary>
+        public static Sprite Circle => s_Circle != null ? s_Circle : s_Circle = MakeSprite("Circle", 128, 0, (x, y, n) =>
+            Mathf.Clamp01(n / 2f - 1 - Vector2.Distance(new Vector2(x, y), new Vector2(n / 2f, n / 2f)) + 0.5f));
+
+        /// <summary>White sprite from an alpha function of pixel center (x, y) in an n×n texture; mipmapped for VR.</summary>
+        public static Sprite MakeSprite(string name, int n, int border, Func<float, float, int, float> alpha)
+        {
+            var tex = new Texture2D(n, n, TextureFormat.RGBA32, true) { wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Trilinear, name = name };
+            var px = new Color32[n * n];
+            for (var y = 0; y < n; y++)
+            for (var x = 0; x < n; x++)
+                px[y * n + x] = new Color32(255, 255, 255, (byte)(Mathf.Clamp01(alpha(x + 0.5f, y + 0.5f, n)) * 255));
+            tex.SetPixels32(px);
+            tex.Apply(true, true);
+            return Sprite.Create(tex, new Rect(0, 0, n, n), new Vector2(0.5f, 0.5f), 100, 0, SpriteMeshType.FullRect, new Vector4(border, border, border, border));
         }
 
         public static Canvas CreateCanvas(string name, Vector2 sizePx, float metersPerPx)
@@ -80,6 +92,12 @@ namespace VRShop.UI
             return rt;
         }
 
+        public static void Place(RectTransform rt, float x, float y, float w, float h)
+        {
+            rt.anchoredPosition = new Vector2(x, -y);
+            rt.sizeDelta = new Vector2(w, h);
+        }
+
         /// <summary>Stretch to fill the parent.</summary>
         public static RectTransform Fill(Transform parent, string name)
         {
@@ -92,33 +110,77 @@ namespace VRShop.UI
             return rt;
         }
 
-        public static Image Panel(Transform parent, string name, float x, float y, float w, float h, Color color, bool rounded = true)
+        /// <summary>Rounded rectangle (radius in px; 0 = square corners).</summary>
+        public static Image Panel(Transform parent, string name, float x, float y, float w, float h, Color color, float radius = 16)
         {
             var rt = Box(parent, name, x, y, w, h);
             var img = rt.gameObject.AddComponent<Image>();
             img.color = color;
             img.raycastTarget = false;
-            if (rounded)
-            {
-                img.sprite = Rounded;
-                img.type = UnityEngine.UI.Image.Type.Sliced;
-            }
+            SetRadius(img, radius);
             return img;
         }
 
-        public static TextMeshProUGUI Text(Transform parent, string name, float x, float y, float w, float h, string text, float size, Color color,
-            TextAlignmentOptions align = TextAlignmentOptions.TopLeft, FontStyles style = FontStyles.Normal)
+        public static void SetRadius(Image img, float radius)
         {
+            if (radius <= 0) { img.sprite = null; img.type = Image.Type.Simple; return; }
+            img.sprite = Rounded;
+            img.type = Image.Type.Sliced;
+            img.pixelsPerUnitMultiplier = k_SpriteRadius / radius;
+        }
+
+        /// <summary>Soft shadow behind a rect (add it before the rect so it draws underneath).</summary>
+        public static Image Shadow(Transform parent, string name, float x, float y, float w, float h, float spread = 24, float alpha = 0.14f, float offsetY = 8)
+        {
+            var rt = Box(parent, name, x - spread, y - spread + offsetY, w + 2 * spread, h + 2 * spread);
+            var img = rt.gameObject.AddComponent<Image>();
+            img.sprite = ShadowSprite;
+            img.type = Image.Type.Sliced;
+            img.pixelsPerUnitMultiplier = k_ShadowInset / spread;
+            img.color = new Color(0.16f, 0.12f, 0.08f, alpha);
+            img.raycastTarget = false;
+            return img;
+        }
+
+        public static Image Dot(Transform parent, string name, float x, float y, float size, Color color)
+        {
+            var rt = Box(parent, name, x, y, size, size);
+            var img = rt.gameObject.AddComponent<Image>();
+            img.sprite = Circle;
+            img.color = color;
+            img.raycastTarget = false;
+            return img;
+        }
+
+        public static Image Hairline(Transform parent, string name, float x, float y, float w) => Panel(parent, name, x, y, w, 2, Theme.Line, 0);
+
+        public static TextMeshProUGUI Text(Transform parent, string name, float x, float y, float w, float h, string text, float size, Color color,
+            Face face = Face.Regular, TextAlignmentOptions align = TextAlignmentOptions.TopLeft)
+        {
+            // TMP hides a line that doesn't fit its box (ellipsis mode), so never make a box shorter than one line.
+            // DM Serif's line box is 1.37 em, Inter's 1.21 em.
+            h = Mathf.Max(h, size * (face == Face.Serif || face == Face.SerifItalic ? 1.38f : 1.22f) + 1);
             var rt = Box(parent, name, x, y, w, h);
             var t = rt.gameObject.AddComponent<TextMeshProUGUI>();
+            t.font = Theme.FontFor(face);
             t.text = text;
             t.fontSize = size;
             t.color = color;
             t.alignment = align;
-            t.fontStyle = style;
             t.textWrappingMode = TextWrappingModes.Normal;
             t.overflowMode = TextOverflowModes.Ellipsis;
             t.raycastTarget = false;
+            return t;
+        }
+
+        /// <summary>Small letter-spaced capitals above a heading ("CURATED FOR YOUR ROOM").</summary>
+        public static TextMeshProUGUI Eyebrow(Transform parent, string name, float x, float y, float w, string text, Color? color = null, float size = 15,
+            TextAlignmentOptions align = TextAlignmentOptions.TopLeft)
+        {
+            var t = Text(parent, name, x, y, w, size + 8, text, size, color ?? Theme.Brass, Face.SemiBold, align);
+            t.fontStyle = FontStyles.UpperCase;
+            t.characterSpacing = 12;
+            t.textWrappingMode = TextWrappingModes.NoWrap;
             return t;
         }
 
@@ -126,25 +188,59 @@ namespace VRShop.UI
         {
             var rt = Box(parent, name, x, y, w, h);
             var img = rt.gameObject.AddComponent<RawImage>();
-            img.color = new Color(1, 1, 1, 0.08f); // placeholder until the texture arrives
+            img.color = Theme.Canvas; // placeholder until the texture arrives
             img.raycastTarget = false;
             return img;
         }
 
-        public static UIButton Button(Transform parent, string name, float x, float y, float w, float h, string label, float fontSize, Action onClick, bool accent = false)
+        public static UIButton Button(Transform parent, string name, float x, float y, float w, float h, string label, float fontSize, Action onClick,
+            ButtonStyle style = ButtonStyle.Secondary)
         {
-            var bg = Panel(parent, name, x, y, w, h, accent ? Accent : ButtonBg);
+            var radius = style switch
+            {
+                ButtonStyle.Card => 18f,
+                ButtonStyle.Nav => 12f,
+                ButtonStyle.Ghost => 14f,
+                _ => h / 2, // pills
+            };
+            var bg = Panel(parent, name, x, y, w, h, Color.clear, radius);
+            if (style == ButtonStyle.Round) { bg.sprite = Circle; bg.type = Image.Type.Simple; }
             var btn = bg.gameObject.AddComponent<UIButton>();
-            var txt = Text(bg.transform, "Label", 8, 0, w - 16, h, label, fontSize, TextColor, TextAlignmentOptions.Center, FontStyles.Bold);
-            btn.Setup(bg, txt, onClick, accent ? Accent : ButtonBg, accent ? AccentHover : ButtonBgHover);
+            var face = style == ButtonStyle.Primary || style == ButtonStyle.Visa || style == ButtonStyle.Round ? Face.SemiBold : Face.Medium;
+            var txt = Text(bg.transform, "Label", 12, 0, w - 24, h, label, fontSize, Theme.Ink, face, TextAlignmentOptions.Center);
+            txt.textWrappingMode = TextWrappingModes.NoWrap;
+            btn.Setup(bg, txt, onClick, ColorsFor(style));
+            if (style == ButtonStyle.Card) btn.HoverLift = 1;
             return btn;
         }
 
-        /// <summary>Show a texture in a RawImage, cropped to fill (like CSS object-fit: cover... but "contain" for product shots).</summary>
+        public static ButtonColors ColorsFor(ButtonStyle style) => style switch
+        {
+            ButtonStyle.Primary => new ButtonColors(Theme.Ink, Theme.InkHover, Theme.OnInk, Theme.OnInk),
+            ButtonStyle.Visa => new ButtonColors(Theme.VisaNavy, Theme.VisaNavyHover, Color.white, Color.white),
+            ButtonStyle.Ghost => new ButtonColors(Theme.Clear, Theme.Sunken, Theme.Muted, Theme.Ink),
+            ButtonStyle.Chip => new ButtonColors(Theme.Sunken, Theme.SunkenHover, Theme.Ink, Theme.Ink, Theme.Ink, Theme.OnInk),
+            ButtonStyle.Nav => new ButtonColors(Theme.Clear, Theme.WithAlpha(Theme.Sunken, 0.7f), Theme.Muted, Theme.Ink, Theme.Clear, Theme.Ink),
+            ButtonStyle.Card => new ButtonColors(Theme.Surface, Theme.SurfaceHover, Theme.Ink, Theme.Ink),
+            ButtonStyle.Round => new ButtonColors(Theme.Surface, Theme.Sunken, Theme.Ink, Theme.Ink),
+            _ => new ButtonColors(Theme.Sunken, Theme.SunkenHover, Theme.Ink, Theme.Ink),
+        };
+
+        /// <summary>Width a single line of text needs in a given face and size (for chips sized to their label).</summary>
+        public static float MeasureWidth(TextMeshProUGUI probe, string text)
+        {
+            var wrap = probe.textWrappingMode;
+            probe.textWrappingMode = TextWrappingModes.NoWrap;
+            var w = probe.GetPreferredValues(text, 4000, 100).x;
+            probe.textWrappingMode = wrap;
+            return w;
+        }
+
+        /// <summary>Show a texture in a RawImage, fit inside ("contain": studio shots are on white, like the cards).</summary>
         public static void SetPicture(RawImage img, Texture2D tex, bool contain = true)
         {
             if (img == null) return;
-            if (tex == null) { img.texture = null; img.color = new Color(1, 1, 1, 0.08f); return; }
+            if (tex == null) { img.texture = null; img.color = Theme.Canvas; img.uvRect = new Rect(0, 0, 1, 1); return; }
             img.texture = tex;
             img.color = Color.white;
             var rt = img.rectTransform;
@@ -152,18 +248,44 @@ namespace VRShop.UI
             var texAspect = tex.width / (float)Mathf.Max(1, tex.height);
             if (contain)
             {
-                // Fit inside by adjusting uvRect beyond 0..1 (clamped texture shows edge color: studio shots are white).
-                if (texAspect > boxAspect) { var s = texAspect / boxAspect; img.uvRect = new UnityEngine.Rect(0, (1 - s) / 2, 1, s); }
-                else { var s = boxAspect / texAspect; img.uvRect = new UnityEngine.Rect((1 - s) / 2, 0, s, 1); }
+                // Fit inside by extending uvRect beyond 0..1 (the clamped white edge fills the rest).
+                if (texAspect > boxAspect) { var s = texAspect / boxAspect; img.uvRect = new Rect(0, (1 - s) / 2, 1, s); }
+                else { var s = boxAspect / texAspect; img.uvRect = new Rect((1 - s) / 2, 0, s, 1); }
             }
             else
             {
-                if (texAspect > boxAspect) { var s = boxAspect / texAspect; img.uvRect = new UnityEngine.Rect((1 - s) / 2, 0, s, 1); }
-                else { var s = texAspect / boxAspect; img.uvRect = new UnityEngine.Rect(0, (1 - s) / 2, 1, s); }
+                if (texAspect > boxAspect) { var s = boxAspect / texAspect; img.uvRect = new Rect((1 - s) / 2, 0, s, 1); }
+                else { var s = texAspect / boxAspect; img.uvRect = new Rect(0, (1 - s) / 2, 1, s); }
             }
         }
 
         public static string Money(float? v) => v.HasValue ? (v.Value % 1 == 0 ? $"${v.Value:N0}" : $"${v.Value:N2}") : "";
+
+        public static string Price(Api.Product p) => string.IsNullOrEmpty(p.priceText) ? Money(p.price) : p.priceText;
+
+        /// <summary>"living_room" → "Living room".</summary>
+        public static string Pretty(string key) => string.IsNullOrEmpty(key) ? "" : char.ToUpper(key[0]) + key.Substring(1).Replace('_', ' ');
+
+        /// <summary>"living room" → "Living Room".</summary>
+        public static string TitleCase(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            var words = s.Replace('_', ' ').Split(' ');
+            for (var i = 0; i < words.Length; i++)
+                if (words[i].Length > 0) words[i] = char.ToUpper(words[i][0]) + words[i].Substring(1);
+            return string.Join(" ", words);
+        }
+
+        /// <summary>"Living room (assumed; no photos provided)" → "living room": the room type as a person would say it.</summary>
+        public static string RoomName(string roomType)
+        {
+            if (string.IsNullOrWhiteSpace(roomType)) return "";
+            var s = System.Text.RegularExpressions.Regex.Replace(roomType, @"\s*[\(\[].*?[\)\]]", "").Replace('_', ' ').Trim();
+            return s.ToLowerInvariant();
+        }
+
+        /// <summary>Server text may contain '&lt;' (e.g. "&lt;= budget"): keep TMP from reading it as a tag.</summary>
+        public static string Plain(string t) => string.IsNullOrEmpty(t) ? "" : t.Replace("<", "‹").Replace(">", "›");
 
         /// <summary>Place a panel in front of the head, pulled closer if a real wall is in the way.</summary>
         public static void PlaceInFront(Transform panel, float distance, float drop, float maxWallGap = 0.12f)
@@ -180,6 +302,19 @@ namespace VRShop.UI
             }
             panel.position = head.position + fwd * distance + Vector3.down * drop;
             panel.rotation = Quaternion.LookRotation(fwd, Vector3.up);
+        }
+    }
+
+    /// <summary>Background / label colors for a button's normal, hovered and selected states.</summary>
+    public struct ButtonColors
+    {
+        public Color bg, bgHover, fg, fgHover, bgSelected, fgSelected;
+
+        public ButtonColors(Color bg, Color bgHover, Color fg, Color fgHover, Color? bgSelected = null, Color? fgSelected = null)
+        {
+            this.bg = bg; this.bgHover = bgHover; this.fg = fg; this.fgHover = fgHover;
+            this.bgSelected = bgSelected ?? bgHover;
+            this.fgSelected = fgSelected ?? fgHover;
         }
     }
 }

@@ -5,12 +5,18 @@ using VRShop.Input;
 
 namespace VRShop.UI
 {
-    /// <summary>Head-locked (lazy-follow) status line for short messages: "Listening…", "Designing your room…".</summary>
+    /// <summary>
+    /// Small lazy-follow notice for quick confirmations ("Added to your bag", "Cleared 3 items"). Conversation
+    /// with the designer goes through the AssistantOrb instead; this sits low and slightly right so the two never
+    /// cover each other.
+    /// </summary>
     public class Toast : MonoBehaviour
     {
         public static Toast Instance { get; private set; }
+        const float W = 640, CanvasH = 260, MinH = 64, MinW = 260;
+
         TextMeshProUGUI m_Text;
-        Image m_Bg;
+        Image m_Bg, m_Shadow, m_Dot;
         CanvasGroup m_Group;
         float m_Until;
         bool m_Sticky;
@@ -22,21 +28,30 @@ namespace VRShop.UI
         void Awake()
         {
             Instance = this;
-            // Tall enough for a voice answer: the heard text plus a two-sentence reply (auto-sized).
-            var canvas = UIKit.CreateCanvas("ToastCanvas", new Vector2(900, 150), 0.0006f);
+            var canvas = UIKit.CreateCanvas("ToastCanvas", new Vector2(W, CanvasH), 0.0005f);
             canvas.transform.SetParent(transform, false);
             m_Group = canvas.gameObject.AddComponent<CanvasGroup>();
-            m_Bg = UIKit.Panel(canvas.transform, "Bg", 0, 0, 900, 150, new Color(0.06f, 0.07f, 0.09f, 0.92f));
-            m_Text = UIKit.Text(m_Bg.transform, "Text", 28, 8, 844, 134, "", 30, UIKit.TextColor, TextAlignmentOptions.Center);
-            m_Text.enableAutoSizing = true;
-            m_Text.fontSizeMin = 20;
-            m_Text.fontSizeMax = 30;
+            m_Shadow = UIKit.Shadow(canvas.transform, "Shadow", 0, 0, W, MinH, 22, 0.2f, 6);
+            m_Bg = UIKit.Panel(canvas.transform, "Bg", 0, 0, W, MinH, Theme.Surface, MinH / 2);
+            m_Dot = UIKit.Dot(m_Bg.transform, "Dot", 30, 0, 12, Theme.Brass);
+            m_Text = UIKit.Text(m_Bg.transform, "Text", 58, 0, W - 92, MinH, "", 22, Theme.Ink, Face.Medium, TextAlignmentOptions.MidlineLeft);
+            m_Text.overflowMode = TextOverflowModes.Truncate;
             m_Group.alpha = 0;
         }
 
         void Set(string msg, float seconds, bool sticky)
         {
             m_Text.text = msg;
+            // Hug the message: as wide as one line needs (up to W), taller for longer messages; centered on the anchor.
+            var w = Mathf.Clamp(UIKit.MeasureWidth(m_Text, msg) + 92, MinW, W);
+            var h = Mathf.Clamp(m_Text.GetPreferredValues(msg, w - 92, 0).y + 30, MinH, CanvasH - 20);
+            var x = (W - w) / 2;
+            var y = (CanvasH - h) / 2;
+            UIKit.Place(m_Bg.rectTransform, x, y, w, h);
+            UIKit.Place(m_Shadow.rectTransform, x - 22, y - 22 + 6, w + 44, h + 44);
+            UIKit.Place(m_Text.rectTransform, 58, 0, w - 92, h);
+            UIKit.Place(m_Dot.rectTransform, 30, h / 2 - 6, 12, 12);
+            UIKit.SetRadius(m_Bg, Mathf.Min(h / 2, 28));
             m_Sticky = sticky;
             m_Until = Time.time + seconds;
             Debug.Log($"[VRShop] {msg}");
@@ -48,12 +63,14 @@ namespace VRShop.UI
             m_Group.alpha = Mathf.MoveTowards(m_Group.alpha, visible ? 1 : 0, Time.deltaTime * 4);
             var head = XRInput.Instance != null ? XRInput.Instance.Head : (Camera.main != null ? Camera.main.transform : null);
             if (head == null) return;
-            // Lazy follow: sit ~0.75 m ahead, a bit below eye level.
+            // Lazy follow: ~0.8 m ahead, low and a little right of center.
             var fwd = Vector3.ProjectOnPlane(head.forward, Vector3.up).normalized;
             if (fwd.sqrMagnitude < 0.01f) fwd = Vector3.forward;
-            var target = head.position + fwd * 0.75f + Vector3.down * 0.28f;
-            transform.position = Vector3.Lerp(transform.position, target, 1 - Mathf.Exp(-Time.deltaTime * 4));
-            transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(fwd, Vector3.up), 1 - Mathf.Exp(-Time.deltaTime * 4));
+            var right = Vector3.Cross(Vector3.up, fwd);
+            var target = head.position + fwd * 0.78f + right * 0.12f + Vector3.down * 0.27f;
+            var k = 1 - Mathf.Exp(-Time.deltaTime * 4);
+            transform.position = Vector3.Lerp(transform.position, target, k);
+            transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(transform.position - head.position, Vector3.up), k);
         }
     }
 }

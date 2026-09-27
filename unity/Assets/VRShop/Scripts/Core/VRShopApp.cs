@@ -7,6 +7,7 @@ using Meta.XR.MRUtilityKit;
 using Newtonsoft.Json;
 using UnityEngine;
 using VRShop.Api;
+using VRShop.Assistant;
 using VRShop.Furniture;
 using VRShop.Input;
 using VRShop.Interaction;
@@ -38,11 +39,14 @@ namespace VRShop.Core
 
         public ApiClient Api { get; private set; }
         public Session Session { get; private set; }
+        /// <summary>What the backend can do (OpenAI, spoken replies, Google Shopping, 3D generation).</summary>
+        public Capabilities Capabilities { get; private set; }
         public event Action<Session> SessionChanged;
 
         string m_RoomSignature;
         bool m_GeometrySent;
         int m_PollCount;
+        bool m_Greeted;
 
         [Serializable]
         class Overrides { public string backendUrl; public string sessionId; }
@@ -68,6 +72,7 @@ namespace VRShop.Core
             Add<ManipulationController>("Manipulation");
             Add<FurnitureManager>("Furniture");
             Add<Toast>("Toast");
+            Add<AssistantOrb>("Assistant");
             Add<CatalogPanel>("Catalog");
             Add<VoiceCommand>("Voice");
             Add<LaserPointer>("LaserRight").hand = Hand.Right;
@@ -113,14 +118,14 @@ namespace VRShop.Core
                 try
                 {
                     var h = await Api.Health();
+                    Capabilities = h.capabilities;
                     Debug.Log($"[VRShop] Connected to {Api.BaseUrl} (openai={h.capabilities?.openai}, serpapi={h.capabilities?.serpapi}, 3D={h.capabilities?.generator})");
                     return;
                 }
                 catch (Exception e)
                 {
-                    var msg = $"Can't reach the VRShop server at\n{Api.BaseUrl}\n\n<size=24><color=#A9B0BC>Is the backend running and on the same Wi-Fi? ({e.Message})\nRetrying…</color></size>";
-                    CatalogPanel.Instance?.ShowMessage(msg);
-                    if (attempt == 0) Toast.Show("Connecting to the VRShop server…", 4);
+                    CatalogPanel.Instance?.ShowMessage("Can't reach the showroom",
+                        $"Is the VRShop server running at {Api.BaseUrl}, on the same Wi-Fi as the headset?\n{UIKit.Plain(e.Message)}  ·  Retrying…", true);
                     await Task.Delay(3000);
                 }
             }
@@ -139,16 +144,16 @@ namespace VRShop.Core
                         try { s = await Api.LatestSession(); }
                         catch (ApiException e) when (e.Status == 404 && createDemoSessionIfNone)
                         {
-                            Toast.Show("No room scanned yet — starting a demo room. Scan yours with the phone app!", 6);
-                            s = await Api.CreateDemoSession();
+                            s = await Api.CreateDemoSession(); // no room scan yet: start from a sample room
                         }
                     }
                     SetSession(s);
+                    Invoke(nameof(Greet), 1.5f);
                     return;
                 }
                 catch (Exception e)
                 {
-                    CatalogPanel.Instance?.ShowMessage($"Couldn't load your room session\n<size=24><color=#A9B0BC>{e.Message}</color></size>");
+                    CatalogPanel.Instance?.ShowMessage("Couldn't open your room", UIKit.Plain(e.Message) + "  ·  Retrying…", true);
                     await Task.Delay(3000);
                 }
             }
@@ -169,7 +174,7 @@ namespace VRShop.Core
                         var latest = await Api.LatestSession();
                         if (latest != null && latest.id != Session.id && latest.updatedAt > Session.updatedAt)
                         {
-                            Toast.Show("New room from your phone — loading it", 4);
+                            Toast.Show("Loading your new room scan", 4);
                             FurnitureManager.Instance.ClearAll();
                             m_GeometrySent = false;
                             SetSession(latest);
@@ -190,7 +195,10 @@ namespace VRShop.Core
             var first = Session == null || Session.id != s.id;
             // Announce when the agent finishes checking out ("Room bought: 3 stores, $1,412 of $1,500 via Visa").
             if (!first && Session.checkout?.status == "running" && s.checkout != null && s.checkout.status != "running" && !string.IsNullOrEmpty(s.checkout.summary))
-                Toast.Show(s.checkout.summary, 8);
+            {
+                if (AssistantOrb.Instance != null) AssistantOrb.Instance.Say(s.checkout.summary);
+                else Toast.Show(s.checkout.summary, 8);
+            }
             // Keep product model status we learned locally if the server copy is older.
             Session = s;
             var sig = s.room != null ? $"{s.id}:{s.room.summary}:{s.room.lighting?.kelvin}" : s.id;
@@ -207,6 +215,18 @@ namespace VRShop.Core
         {
             if (Session?.products == null || p == null) return;
             Session.products[p.id] = p;
+        }
+
+        /// <summary>The designer introduces itself once per launch.</summary>
+        void Greet()
+        {
+            if (m_Greeted || Session == null || AssistantOrb.Instance == null) return;
+            m_Greeted = true;
+            var room = UIKit.RoomName(Session.room?.roomType);
+            var line = string.IsNullOrEmpty(room)
+                ? "Welcome in. I'm curating pieces for your room — it only takes a moment. Tell me what you're looking for anytime."
+                : $"Welcome in. I've pulled pieces that suit your {room}. Tell me what you're looking for.";
+            AssistantOrb.Instance.Say(line, "Hold X, or point at me and pull the trigger");
         }
 
         async Task SendGeometry()
@@ -232,9 +252,10 @@ namespace VRShop.Core
             // Include what is already placed so the layout accounts for it.
             foreach (var it in FurnitureManager.Instance.Items)
                 if (!ids.Contains(it.Product.id)) ids.Add(it.Product.id);
-            if (ids.Count == 0) { Toast.Show("Nothing to arrange yet"); return; }
+            var orb = AssistantOrb.Instance;
+            if (ids.Count == 0) { orb?.Notify("There's nothing to arrange yet — add a few pieces first."); return; }
 
-            Toast.Sticky("Designing your room…");
+            orb?.Think("Arranging your room…");
             CatalogPanel.Instance?.Hide();
             try
             {
@@ -243,12 +264,18 @@ namespace VRShop.Core
                 var user = new UserDto { position = new Vec3(head.position), forward = new Vec3(Vector3.ProjectOnPlane(head.forward, Vector3.up).normalized) };
                 var res = await Api.Layout(Session.id, ids, user);
                 FurnitureManager.Instance.ApplyLayout(res.placements, Session);
-                var why = res.placements.Where(p => !string.IsNullOrEmpty(p.reason)).Select(p => $"{Session.GetProduct(p.productId)?.category?.Replace('_', ' ')}: {p.reason}").Take(3);
-                Toast.Show($"Arranged {res.placements.Count} pieces{(res.usedDefaultRoom ? " (default room — run Space Setup for yours)" : "")}\n<size=22>{string.Join("\n", why)}</size>", 7);
+                var n = res.placements.Count;
+                var why = res.placements.Select(p => p.reason).FirstOrDefault(r => !string.IsNullOrEmpty(r));
+                var line = $"Here's a first layout: {n} piece{(n == 1 ? "" : "s")}, arranged around your space.";
+                if (!string.IsNullOrEmpty(why)) line += $" {char.ToUpper(why[0])}{why.Substring(1).TrimEnd('.')}.";
+                if (res.usedDefaultRoom) line += " I used a standard room — run Space Setup on the headset so I can use yours.";
+                if (orb != null) orb.Say(line);
+                else Toast.Show(line, 7);
             }
             catch (Exception e)
             {
-                Toast.Show($"Layout failed: {e.Message}", 5);
+                if (orb != null) orb.Fail($"I couldn't arrange the room: {e.Message}");
+                else Toast.Show($"Layout failed: {e.Message}", 5);
             }
         }
     }

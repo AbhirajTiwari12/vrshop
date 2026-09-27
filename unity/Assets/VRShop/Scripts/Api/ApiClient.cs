@@ -51,6 +51,19 @@ namespace VRShop.Api
         public Task<Session> StartCheckout(string id, bool allowOverBudget) => Send<Session>("POST", $"/api/sessions/{id}/checkout", new { via = "headset", allowOverBudget });
         public Task<Session> Swap(string id, string from, string to) => Send<Session>("POST", $"/api/sessions/{id}/cart/swap", new { from, to });
         public Task<BrowseMoreResponse> BrowseMore(string id) => Send<BrowseMoreResponse>("POST", $"/api/sessions/{id}/browse/more", new { }, 60);
+        /// <summary>Register a line for the designer to say; returns the WAV URL (synthesized once on the server, cached).</summary>
+        public Task<SpeechResponse> Speech(string text) => Send<SpeechResponse>("POST", "/api/speech", new { text }, 15);
+
+        /// <summary>Raw bytes of a backend resource (e.g. a speech WAV).</summary>
+        public async Task<byte[]> GetBytes(string url, int timeoutSec = 30)
+        {
+            using var req = UnityWebRequest.Get(Abs(url));
+            req.timeout = timeoutSec;
+            await SendAsync(req);
+            if (req.result != UnityWebRequest.Result.Success)
+                throw new ApiException((int)req.responseCode, ErrorText(req, req.downloadHandler?.text));
+            return req.downloadHandler.data;
+        }
 
         public async Task<VoiceResponse> Voice(string sessionId, byte[] wav, string focusProductId = null)
         {

@@ -255,16 +255,19 @@ namespace VRShop.Api
     {
         public string transcript;
         public string reply;
-        public string action;     // none | open | add_to_cart | remove_from_cart | place
+        public string action;     // none | open | add_to_cart | remove_from_cart | place | checkout
         public string productId;  // the product the action/question refers to
         public bool atPointer;
         public BrowseResult browse;
         public Session session;
+        public string speechUrl;  // the reply as speech (WAV), when the server has text to speech
         public string error;
     }
 
+    public class SpeechResponse { public string url; }
+
     public class BrowseMoreResponse { public int added; public string liveSearched; public Session session; }
 
-    public class Capabilities { public bool openai; public bool serpapi; public bool ikea; public string generator; }
+    public class Capabilities { public bool openai; public bool tts; public bool serpapi; public bool ikea; public string generator; }
     public class Health { public bool ok; public string baseUrl; public Capabilities capabilities; }
 }

@@ -68,6 +68,7 @@ namespace VRShop.EditorTools
             ConfigureUrp();
             EditorUtility.DisplayProgressBar("VRShop", "TextMeshPro resources…", 0.45f);
             ImportTmpEssentials();
+            FontBuilder.BuildIfMissing();
             EditorUtility.DisplayProgressBar("VRShop", "Materials…", 0.55f);
             CreateRuntimeMaterials();
             CreateGltfVariantKeepers();

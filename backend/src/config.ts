@@ -46,6 +46,11 @@ export const config = {
     model: env('OPENAI_MODEL', 'gpt-6-luna'),
     visionModel: env('OPENAI_VISION_MODEL', 'gpt-6-sol'),
     transcribeModel: env('OPENAI_TRANSCRIBE_MODEL', 'gpt-transcribe'),
+    // The designer's spoken voice in the headset (text to speech).
+    ttsModel: env('OPENAI_TTS_MODEL', 'gpt-4o-mini-tts'),
+    ttsVoice: env('OPENAI_TTS_VOICE', 'coral'),
+    ttsInstructions: env('OPENAI_TTS_INSTRUCTIONS',
+      'You are a warm, poised interior designer in a boutique furniture showroom. Speak naturally and unhurried, friendly and confident, like talking to a client beside you. Never sound robotic.'),
     baseUrl: env('OPENAI_BASE_URL', 'https://api.openai.com/v1').replace(/\/$/, ''),
   },
   serpapiKey: env('SERPAPI_KEY'),
@@ -111,6 +116,7 @@ export function baseUrl(): string {
 export function capabilities() {
   return {
     openai: !!config.openai.key,
+    tts: !!config.openai.key, // spoken designer replies (OpenAI text to speech)
     serpapi: config.shopping.provider !== 'none', // "Google Shopping available" (via Serper.dev or SerpAPI)
     shopping: config.shopping.provider,
     ikea: true,

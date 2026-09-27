@@ -21,6 +21,7 @@ import { ensureModel, modelFile } from './models/pipeline.js';
 import { solveLayout, defaultGeometry, type LayoutItem } from './layout.js';
 import { categoryDef } from './catalog.js';
 import { transcribe, hasOpenAI } from './ai/openai.js';
+import { speechAudio, speechUrl } from './ai/speech.js';
 import { BROWSER_UA, fetchBuffer } from './util/http.js';
 import { log, errMsg } from './util/log.js';
 import type { Placement, RoomGeometry } from './types.js';
@@ -119,7 +120,7 @@ app.post('/api/sessions/:id/voice', audioUpload.single('audio'), async (req, res
   if (!transcript) return void res.json({ transcript: '', reply: "Sorry, I didn't catch that." });
   const focus = String(req.body?.focusProductId ?? '') || undefined;
   const r = await sessionAsk(String(req.params.id), transcript, { via: 'voice', focusProductId: focus });
-  res.json({ ...r, session: expandSession(getSession(String(req.params.id))!) });
+  res.json({ ...r, speechUrl: speechUrl(r.reply), session: expandSession(getSession(String(req.params.id))!) });
 });
 
 // Typed version of the same conversation.
@@ -129,7 +130,26 @@ app.post('/api/sessions/:id/ask', async (req, res) => {
   if (!text) return void res.status(400).json({ error: 'text required' });
   const focus = String(req.body?.focusProductId ?? '') || undefined;
   const r = await sessionAsk(String(req.params.id), text, { via: 'text', focusProductId: focus });
-  res.json({ ...r, session: expandSession(getSession(String(req.params.id))!) });
+  res.json({ ...r, speechUrl: req.body?.speak ? speechUrl(r.reply) : undefined, session: expandSession(getSession(String(req.params.id))!) });
+});
+
+// The designer's voice: register a line (greetings, "I arranged your room"), then fetch its WAV. Lines are
+// synthesized once with OpenAI text to speech and cached on disk.
+app.post('/api/speech', (req, res) => {
+  const text = String(req.body?.text ?? '').trim();
+  if (!text) return void res.status(400).json({ error: 'text required' });
+  const url = speechUrl(text);
+  if (!url) return void res.status(400).json({ error: 'Spoken replies need OPENAI_API_KEY on the server' });
+  res.json({ url });
+});
+
+app.get('/api/speech/:file', async (req, res) => {
+  const id = String(req.params.file).replace(/\.wav$/, '');
+  if (!/^[a-f0-9]{8,40}$/.test(id)) return void res.status(404).end();
+  const wav = await speechAudio(id);
+  res.setHeader('Content-Type', 'audio/wav');
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.end(wav);
 });
 
 // Manual filters (chips, sliders). Never triggers a paid search by itself...
