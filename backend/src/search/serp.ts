@@ -6,7 +6,7 @@ import { parseDims } from '../catalog.js';
 import type { Dims, Product } from '../types.js';
 import { formatPrice } from './ikea.js';
 import { extractAttributes } from '../inventory/attributes.js';
-import { recordShoppingCall } from '../inventory/usage.js';
+import { liveSearchBudgetLeft, recordShoppingCall } from '../inventory/usage.js';
 
 // Google Shopping: real listings from Amazon, Wayfair, Target, Walmart, etc., via one of two providers:
 //  - Serper.dev (POST google.serper.dev/shopping): 2,500 free queries, then ~$1 / 1k. Preferred when its key is set.
@@ -21,18 +21,31 @@ const SERPER = 'https://google.serper.dev/shopping';
 export interface ShoppingOpts { maxPrice?: number; limit?: number }
 
 export async function searchShopping(query: string, opts: ShoppingOpts = {}): Promise<Product[]> {
+  return (await trySearchShopping(query, opts)) ?? [];
+}
+
+/** Like searchShopping, but null when the call failed (bad key, timeout...), so callers don't cache a failure as "no results". */
+export async function trySearchShopping(query: string, opts: ShoppingOpts = {}): Promise<Product[] | null> {
   const provider = config.shopping.provider;
   if (provider === 'none') return [];
+  if (config.demo3dOnly) {
+    log.info('shopping', `DEMO_3D_ONLY: skipped "${query}"`);
+    return null;
+  }
+  if (liveSearchBudgetLeft() <= 0) {
+    log.warn('shopping', `monthly limit (${config.shopping.monthlyLiveLimit}) reached; skipped "${query}"`);
+    return null;
+  }
   try {
-    recordShoppingCall(provider);
     const rows = provider === 'serper' ? await serper(query, opts) : await serpapi(query, opts);
+    recordShoppingCall(provider); // failed calls aren't billed, so they don't count toward the monthly cap
     return rows
       .filter((r) => r.title && r.image && (!opts.maxPrice || r.price == null || r.price <= opts.maxPrice))
       .slice(0, opts.limit ?? 16)
       .map(toProduct);
   } catch (e) {
     log.warn('shopping', `${provider} "${query}" failed: ${errMsg(e)}`);
-    return [];
+    return null;
   }
 }
 
@@ -41,7 +54,7 @@ interface Row { id?: string; title: string; store: string; price: number | null;
 async function serpapi(query: string, opts: ShoppingOpts): Promise<Row[]> {
   const params = new URLSearchParams({ engine: 'google_shopping', q: query, gl: 'us', hl: 'en', api_key: config.serpapiKey });
   if (opts.maxPrice) params.set('max_price', String(Math.round(opts.maxPrice)));
-  const data = await fetchJson<any>(`${SERP}?${params}`, { timeoutMs: 25000, retries: 1 });
+  const data = await fetchJson<any>(`${SERP}?${params}`, { timeoutMs: 25000 });
   return (data?.shopping_results ?? []).map((r: any): Row => ({
     id: r.product_id,
     title: r.title,
@@ -65,7 +78,6 @@ async function serper(query: string, opts: ShoppingOpts): Promise<Row[]> {
   const data = await fetchJson<any>(SERPER, {
     method: 'POST',
     timeoutMs: 20000,
-    retries: 1,
     headers: { 'X-API-KEY': config.serperKey, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
@@ -121,7 +133,8 @@ function toProduct(r: Row): Product {
 
 export interface ImmersiveDetails { storeUrl?: string; store?: string; price?: number; images: string[]; dims?: Dims; description?: string }
 
-/** Resolve the direct store link, extra product images and (sometimes) dimensions. Costs 1 search. */
+/** Resolve the direct store link, extra product images and (sometimes) dimensions. Costs 1 search, so nothing calls it
+ *  automatically any more: the Google link still reaches the product and dims fall back to an AI estimate. */
 export async function immersiveDetails(pageToken: string): Promise<ImmersiveDetails | null> {
   if (!config.serpapiKey || !pageToken) return null;
   const params = new URLSearchParams({ engine: 'google_immersive_product', page_token: pageToken, more_stores: 'true', api_key: config.serpapiKey });

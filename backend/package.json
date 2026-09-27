@@ -11,7 +11,8 @@
     "smoke": "tsx scripts/smoke.ts",
     "reset": "tsx scripts/reset.ts",
     "gen-test": "tsx scripts/gen-test.ts",
-    "catalog:pull": "tsx scripts/pull-catalog.ts"
+    "catalog:pull": "tsx scripts/pull-catalog.ts",
+    "catalog:check-3d": "tsx scripts/check-3d.ts"
   },
   "engines": {
     "node": ">=20"

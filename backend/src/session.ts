@@ -2,14 +2,14 @@ import { categoryDef, normalizeCategory } from './catalog.js';
 import { config } from './config.js';
 import { analyzeRoom, rankProducts, voiceIntent, type VoiceIntent } from './ai/designer.js';
 import { answer, interpret, short, superlative, type Action } from './ai/assistant.js';
-import { searchIkea, ikeaHasModel } from './search/ikea.js';
-import { immersiveDetails, searchShopping } from './search/serp.js';
-import { addProducts, allMatches, hasQuery, queryInventory, queryKey, recordQuery } from './inventory/inventory.js';
+import { searchIkea } from './search/ikea.js';
+import { checkOfficialModels, withOfficialModels } from './inventory/official3d.js';
+import { trySearchShopping } from './search/serp.js';
+import { addProducts, allMatches, hasQuery, inventoryProduct, queryInventory, queryKey, recordQuery } from './inventory/inventory.js';
 import { describeFilters, isEmpty, normalizeFilters } from './inventory/filters.js';
-import { liveSearchBudgetLeft } from './inventory/usage.js';
 import { buildQuote } from './pay/quote.js';
 import { ensureModel } from './models/pipeline.js';
-import { getProduct, getSession, newId, saveSession, updateProduct, upsertProduct } from './store.js';
+import { getProduct, getSession, newId, saveSession, upsertProduct } from './store.js';
 import { mapLimit } from './util/http.js';
 import { log, errMsg } from './util/log.js';
 import type { BrowseResult, CategoryResult, ChatTurn, Filters, Product, Recommendation, RoomAnalysis, Session } from './types.js';
@@ -81,14 +81,14 @@ export async function searchCategory(room: RoomAnalysis, rec: Recommendation, or
     pool = local;
     log.info('session', `${category}: ${local.length} candidates from the catalog (no live search)`);
   } else {
-    const [ikea, shopping] = await Promise.all([
-      searchIkea(rec.ikeaQuery || categoryDef(category).label, 16),
-      searchShopping(rec.query, { maxPrice: priceCap, limit: 16 }),
-    ]);
     // Admission drops parts/accessories (covers, legs, bulbs) and wrong categories; results grow the catalog.
+    const ikea = await searchIkea(rec.ikeaQuery || categoryDef(category).label, 16);
     ikeaFiltered = addProducts(ikea, category).kept.filter((p) => p.category === category).map((p) => ({ ...p }));
+    // Google Shopping costs a search: only when the catalog and IKEA together can't offer a real choice.
+    const shopping = local.length + ikeaFiltered.length < 3 ? ((await trySearchShopping(rec.query, { maxPrice: priceCap, limit: 16 })) ?? []) : [];
     const shop = addProducts(shopping, category).kept.filter((p) => p.category === category).map((p) => ({ ...p }));
-    pool = [...ikeaFiltered.slice(0, 10), ...shop.slice(0, 12)];
+    const seen = new Set<string>();
+    pool = [...local, ...ikeaFiltered.slice(0, 10), ...shop.slice(0, 12)].filter((p) => !seen.has(p.id) && seen.add(p.id));
   }
   if (priceCap) pool = pool.filter((p) => p.price == null || p.price <= priceCap * 1.25);
   if (rec.maxDims) {
@@ -96,12 +96,12 @@ export async function searchCategory(room: RoomAnalysis, rec: Recommendation, or
     pool = pool.filter((p) => !p.dims || (Math.max(p.dims.w, p.dims.d) <= Math.max(m.w, m.d) * 1.15 && p.dims.h <= m.h * 1.2));
   }
   for (const p of pool) p.category = category;
+  if (config.demo3dOnly) pool = await withOfficialModels(pool);
 
   let ranked = await rankProducts(room, rec, pool, 8);
 
   // Always surface a couple of IKEA items that have official 3D models: they look the most real in VR.
-  const withModel = await Promise.all(ikeaFiltered.slice(0, 6).map(async (p) => ((await ikeaHasModel(p.ikeaItemNo!)) ? p : null)));
-  const official = withModel.filter(Boolean) as Product[];
+  const official = await withOfficialModels(ikeaFiltered.slice(0, 6));
   for (const p of official.slice(0, 2)) {
     if (!ranked.some((r) => r.id === p.id)) {
       p.category = category;
@@ -126,7 +126,7 @@ function prefetchModels(id: string) {
   const s = getSession(id);
   if (!s) return;
   for (const c of s.categories) {
-    for (const pid of c.productIds.slice(0, 3)) {
+    for (const pid of config.demo3dOnly ? c.productIds : c.productIds.slice(0, 3)) {
       const p = getProduct(pid);
       if (p?.source === 'ikea') ensureModel(pid, { allowGenerate: false });
     }
@@ -182,12 +182,6 @@ export function setCartQty(id: string, productId: string, qty: number): Session 
       ? s.cart.map((c) => (c.productId === productId ? { ...c, qty } : c))
       : [...s.cart, { productId, qty, addedAt: Date.now() }];
   saveSession({ ...s, cart });
-  // Resolve the direct store link in the background (Google Shopping links point to Google first).
-  if (qty > 0 && !p.storeLinkResolved && p.serpImmersiveToken) {
-    void immersiveDetails(p.serpImmersiveToken).then((d) => {
-      if (d?.storeUrl) updateProduct(p.id, { productUrl: d.storeUrl, storeLinkResolved: true, store: d.store ?? p.store });
-    });
-  }
   return getSession(id)!;
 }
 
@@ -207,17 +201,26 @@ async function liveTopUp(f: Filters): Promise<string | undefined> {
   if (!q) return undefined;
   const shopKey = queryKey(config.shopping.provider, q.shopping);
   const ikeaKey = queryKey('ikea', q.ikea);
-  const doShop = !hasQuery(shopKey, 3 * 86400e3) && liveSearchBudgetLeft() > 0;
-  const doIkea = !hasQuery(ikeaKey, 3 * 86400e3);
-  if (!doShop && !doIkea) return undefined;
-  const [ikea, shop] = await Promise.all([
-    doIkea ? searchIkea(q.ikea, 100) : Promise.resolve([]),
-    doShop ? searchShopping(q.shopping, { maxPrice: f.maxPrice ? f.maxPrice * 1.1 : undefined, limit: 60 }) : Promise.resolve([]),
-  ]);
-  if (doIkea) recordQuery(ikeaKey, addProducts(ikea, f.category).kept.length, 'live');
-  if (doShop) recordQuery(shopKey, addProducts(shop, f.category).kept.length, 'live');
-  log.info('browse', `live top-up "${q.shopping}": IKEA ${ikea.length}, shopping ${shop.length}${doShop ? '' : ' (skipped: cached or monthly limit)'}`);
-  return q.shopping;
+  let searched = false;
+  // IKEA is free, so it goes first; a paid search only happens if the catalog still comes up short.
+  if (!hasQuery(ikeaKey, 3 * 86400e3)) {
+    const ikea = await searchIkea(q.ikea, 100);
+    const { kept } = addProducts(ikea, f.category);
+    recordQuery(ikeaKey, kept.length, 'live');
+    if (f.only3d || config.demo3dOnly) await checkOfficialModels(kept.map((p) => inventoryProduct(p.id) ?? p));
+    searched = true;
+    log.info('browse', `live top-up "${q.ikea}": IKEA ${ikea.length}`);
+    if (queryInventory(f, { limit: 1 }).total >= config.shopping.liveMinResults) return q.shopping;
+  }
+  if (!hasQuery(shopKey, 3 * 86400e3)) {
+    const shop = await trySearchShopping(q.shopping, { maxPrice: f.maxPrice ? f.maxPrice * 1.1 : undefined, limit: 60 });
+    if (shop) {
+      recordQuery(shopKey, addProducts(shop, f.category).kept.length, 'live');
+      searched = true;
+    }
+    log.info('browse', `live top-up "${q.shopping}": shopping ${shop ? shop.length : 'skipped/failed'}`);
+  }
+  return searched ? q.shopping : undefined;
 }
 
 /** Filter the catalog for a session (manual filters, voice, or typed). `live` allows a store search when results are thin. */
@@ -231,7 +234,13 @@ export async function setBrowse(id: string, raw: unknown, opts: { live?: boolean
     if (liveSearched) r = queryInventory(filters, { limit: 48 });
   }
   // Products shown to a client must live in the session store (model pipeline, cart, placements use it).
-  for (const p of r.products) if (!getProduct(p.id)) upsertProduct({ ...p });
+  for (const p of r.products) {
+    const cur = getProduct(p.id);
+    if (!cur) upsertProduct({ ...p });
+    else if (cur.officialModel !== p.officialModel) upsertProduct({ ...cur, officialModel: p.officialModel });
+  }
+  // Demo: have the first few results' official models ready so "place it" is instant (few, to stay under IKEA's rate limit).
+  if (config.demo3dOnly) for (const p of r.products.slice(0, 4)) ensureModel(p.id, { allowGenerate: false });
   const browse: BrowseResult = { filters, productIds: r.products.map((p) => p.id), total: r.total, priceRange: r.priceRange, facets: r.facets, liveSearched, updatedAt: Date.now() };
   saveSession({ ...getSession(id)!, browse });
   return browse;

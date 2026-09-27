@@ -12,7 +12,10 @@ const env = (k: string, d = '') => (process.env[k] ?? d).trim();
 
 export type GenProvider = 'fal' | 'meshy' | 'tripo' | 'none';
 
+const demo3dOnly = ['on', 'true', '1'].includes(env('DEMO_3D_ONLY', 'off').toLowerCase());
+
 function pickGenProvider(): GenProvider {
+  if (demo3dOnly) return 'none'; // demo mode never pays for generation (e.g. when an IKEA download fails)
   const wanted = env('GEN_PROVIDER', 'auto').toLowerCase();
   const has = { fal: !!env('FAL_KEY'), meshy: !!env('MESHY_API_KEY'), tripo: !!env('TRIPO_API_KEY') };
   if (wanted === 'none') return 'none';
@@ -51,10 +54,12 @@ export const config = {
     provider: pickShoppingProvider(),
     // Voice/typed questions search live stores only when the pulled catalog has fewer matches than this.
     liveMode: (env('LIVE_SEARCH', 'fallback').toLowerCase() === 'off' ? 'off' : 'fallback') as 'off' | 'fallback',
-    liveMinResults: Number(env('LIVE_MIN_RESULTS', '6')),
-    // Hard stop for live Google Shopping calls per calendar month (the bulk pull is counted too).
+    liveMinResults: Number(env('LIVE_MIN_RESULTS', '1')),
+    // Hard stop for every Google Shopping call per calendar month (bulk pull, live top-ups, new rooms).
     monthlyLiveLimit: Number(env('SHOPPING_MONTHLY_LIMIT', '200')),
   },
+  // Demo mode: only offer products with an official 3D model (IKEA); no paid searches, no paid 3D generation.
+  demo3dOnly,
   ikea: { country: env('IKEA_COUNTRY', 'us'), lang: env('IKEA_LANG', 'en') },
   // Visa Acceptance (Cybersource) sandbox for real authorizations during agent checkout. Without keys: simulated.
   visa: {

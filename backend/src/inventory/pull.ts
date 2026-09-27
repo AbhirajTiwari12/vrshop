@@ -1,6 +1,7 @@
 import { config } from '../config.js';
+import { checkOfficialModels } from './official3d.js';
 import { searchIkea } from '../search/ikea.js';
-import { searchShopping } from '../search/serp.js';
+import { trySearchShopping } from '../search/serp.js';
 import { mapLimit } from '../util/http.js';
 import { log } from '../util/log.js';
 import { colorsFromImage } from './attributes.js';
@@ -78,13 +79,17 @@ export async function pullCatalog(o: PullOptions) {
       say(`IKEA ${++done}/${ikeaJobs.length}: "${j.q}" → ${kept.length} kept (${found.length - kept.length} parts/other skipped)`);
     });
 
+    // 1b) Which IKEA products have an official 3D model (free; only unchecked ones).
+    await checkOfficialModels(allInventory(), { onProgress: (d, t, f) => say(`Official 3D check ${d}/${t} (${f} found)`) });
+
     // 2) Google Shopping (paid per call): many stores.
     const shopJobs = planShoppingQueries(o);
     done = 0;
     await mapLimit(shopJobs, 3, async (j) => {
       const key = queryKey(config.shopping.provider, j.q);
       if (!o.force && hasQuery(key)) { done++; return; }
-      const found = await searchShopping(j.q, { limit: 100 });
+      const found = await trySearchShopping(j.q, { limit: 100 });
+      if (!found) { say(`Google Shopping ${++done}/${shopJobs.length}: "${j.q}" failed (not cached, will retry next pull)`); return; }
       pullStatus.shoppingCalls++;
       const { added, kept } = addProducts(found, j.category);
       recordQuery(key, kept.length, 'pull');

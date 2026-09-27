@@ -6,7 +6,6 @@ import { dirs, getProduct, updateProduct } from '../store.js';
 import { BROWSER_UA, fetchBuffer } from '../util/http.js';
 import { log, errMsg } from '../util/log.js';
 import { ikeaHasModel, ikeaModelUrl, fetchIkeaDims } from '../search/ikea.js';
-import { immersiveDetails } from '../search/serp.js';
 import { estimateDims } from '../ai/dims.js';
 import { normalizeGlb } from './normalize.js';
 import { buildStandin, dominantColor } from './standin.js';
@@ -91,7 +90,7 @@ async function prepare(id: string, allowGenerate: boolean) {
     }
   }
 
-  // Dimensions for everything else: listing -> store page/immersive -> AI estimate -> category default
+  // Dimensions for everything else: listing -> IKEA page -> AI estimate -> category default (no paid searches)
   const dims = await resolveDims(p);
 
   // 2) Image -> 3D
@@ -136,13 +135,6 @@ async function resolveDims(p: Product): Promise<Dims> {
   let dims: Dims | null = null;
   let source: Product['dimsSource'] = 'listing';
   if (p.ikeaItemNo) dims = await fetchIkeaDims(p.productUrl);
-  if (!dims && p.serpImmersiveToken) {
-    const det = await immersiveDetails(p.serpImmersiveToken);
-    if (det) {
-      if (det.storeUrl) updateProduct(p.id, { productUrl: det.storeUrl, storeLinkResolved: true, images: [...new Set([...det.images, ...p.images])] });
-      dims = det.dims ?? null;
-    }
-  }
   if (!dims) {
     dims = await estimateDims(p.title, p.category);
     source = 'estimated';

@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { DATA_DIR } from '../config.js';
+import { config, DATA_DIR } from '../config.js';
 import { isAccessory, matchCategory } from '../catalog.js';
 import { MATERIAL_FAMILY, extractAttributes } from './attributes.js';
 import type { BrowseResult, Facet, Filters, Product } from '../types.js';
@@ -112,6 +112,13 @@ export function addProducts(products: Product[], hintCategory: string | undefine
   return { added, kept };
 }
 
+export function setOfficialModel(id: string, has: boolean) {
+  const p = db().products[id];
+  if (!p || p.officialModel === has) return;
+  p.officialModel = has;
+  saveInventory();
+}
+
 export function setImageColors(id: string, colors: string[]) {
   const p = db().products[id];
   if (!p || !colors.length) return;
@@ -171,7 +178,7 @@ function failures(p: Product, f: Filters): Dim[] {
   let other = false;
   if ((f.minPrice || f.maxPrice) && (p.price == null || (f.minPrice && p.price < f.minPrice) || (f.maxPrice && p.price > f.maxPrice))) other = true;
   else if (f.minRating && (p.rating == null || p.rating < f.minRating)) other = true;
-  else if (f.only3d && p.source !== 'ikea') other = true;
+  else if ((f.only3d || config.demo3dOnly) && p.officialModel !== true) other = true;
   else if (p.dims && ((f.maxWidthM && p.dims.w > f.maxWidthM * 1.02) || (f.maxDepthM && p.dims.d > f.maxDepthM * 1.02) || (f.maxHeightM && p.dims.h > f.maxHeightM * 1.02))) other = true;
   else if (f.keywords?.length) { const t = textOf(p); if (!f.keywords.every((k) => keywordMatch(t, k))) other = true; }
   if (other) fail('other');

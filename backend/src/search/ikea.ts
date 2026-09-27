@@ -74,21 +74,25 @@ const modelExistsCache = new Map<string, boolean>();
 
 /** True if IKEA publishes an official 3D model for this item (cached HEAD/GET probe). */
 export async function ikeaHasModel(itemNo: string): Promise<boolean> {
+  return (await ikeaModelStatus(itemNo)) === true;
+}
+
+/** true = model exists, false = IKEA says 404, null = couldn't tell (rate limited 429, server error, timeout).
+ *  Only definite answers are cached, so a burst of 429s never turns into "no model". */
+export async function ikeaModelStatus(itemNo: string): Promise<boolean | null> {
   if (modelExistsCache.has(itemNo)) return modelExistsCache.get(itemNo)!;
-  let ok = false;
+  let status: boolean | null = null;
   try {
     // No Origin header on purpose: the CDN rejects third-party origins.
-    const res = await fetchWithTimeout(ikeaModelUrl(itemNo), { method: 'HEAD', timeoutMs: 8000, headers: { 'User-Agent': BROWSER_UA } });
-    ok = res.ok;
-    if (res.status === 405) {
-      const g = await fetchWithTimeout(ikeaModelUrl(itemNo), { timeoutMs: 15000, headers: { 'User-Agent': BROWSER_UA, Range: 'bytes=0-15' } });
-      ok = g.ok || g.status === 206;
-    }
+    let res = await fetchWithTimeout(ikeaModelUrl(itemNo), { method: 'HEAD', timeoutMs: 8000, headers: { 'User-Agent': BROWSER_UA } });
+    if (res.status === 405) res = await fetchWithTimeout(ikeaModelUrl(itemNo), { timeoutMs: 15000, headers: { 'User-Agent': BROWSER_UA, Range: 'bytes=0-15' } });
+    if (res.ok || res.status === 206) status = true;
+    else if (res.status === 404) status = false;
   } catch {
-    ok = false;
+    status = null;
   }
-  modelExistsCache.set(itemNo, ok);
-  return ok;
+  if (status !== null) modelExistsCache.set(itemNo, status);
+  return status;
 }
 
 /** Product (not packaging) measurements from the product page. Best effort; the GLB bounds are the fallback. */

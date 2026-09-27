@@ -45,6 +45,7 @@ export interface Product {
   model: ModelInfo;
   // provider-specific bits
   ikeaItemNo?: string;
+  officialModel?: boolean;         // IKEA publishes a 3D model for it (undefined = not checked yet)
   serpImmersiveToken?: string;
 }
 
@@ -69,7 +70,7 @@ export interface Filters {
   maxWidthM?: number;
   maxDepthM?: number;
   maxHeightM?: number;
-  only3d?: boolean;                // only products with an official (IKEA) 3D model
+  only3d?: boolean;                // only products with a confirmed official (IKEA) 3D model
   sort?: 'relevance' | 'price_asc' | 'price_desc' | 'rating';
 }
 

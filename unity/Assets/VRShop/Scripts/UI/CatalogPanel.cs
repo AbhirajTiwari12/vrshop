@@ -33,7 +33,8 @@ namespace VRShop.UI
         TextMeshProUGUI m_Title, m_Summary, m_CartSummary, m_Stage, m_Tags, m_PageLabel, m_Hint;
         readonly List<Image> m_Swatches = new List<Image>();
         readonly List<UIButton> m_Tabs = new List<UIButton>();
-        UIButton m_TabPrev, m_TabNext, m_CartTab, m_BrowseTab, m_Prev, m_Next, m_Design, m_More;
+        UIButton m_TabPrev, m_TabNext, m_CartTab, m_BrowseTab, m_Prev, m_Next, m_Design, m_More, m_Clear;
+        float m_ClearArmedUntil;
         RectTransform m_FilterBar, m_VisaView;
         TextMeshProUGUI m_VSteps, m_VTitle, m_VInfo;
         UIButton m_VApprove, m_VSecondary, m_CartBuy;
@@ -254,14 +255,40 @@ namespace VRShop.UI
             m_Prev = UIKit.Button(root, "Prev", 36, 730, 120, 60, "< Prev", 20, () => { m_Page = Mathf.Max(0, m_Page - 1); RefreshContent(); });
             m_PageLabel = UIKit.Text(root, "Page", 160, 730, 110, 60, "", 20, UIKit.Muted, TextAlignmentOptions.Center);
             m_Next = UIKit.Button(root, "Next", 274, 730, 120, 60, "Next >", 20, () => { m_Page++; RefreshContent(); });
-            m_Design = UIKit.Button(root, "Design", 470, 730, 566, 60, "Design my room", 24, () => VRShopApp.Instance.DesignMyRoom(), true);
-            m_More = UIKit.Button(root, "More", 470, 730, 566, 60, "Search stores for more", 22, SearchStores, true);
+            m_Design = UIKit.Button(root, "Design", 470, 730, 410, 60, "Design my room", 24, () => VRShopApp.Instance.DesignMyRoom(), true);
+            m_More = UIKit.Button(root, "More", 470, 730, 410, 60, "Search stores for more", 22, SearchStores, true);
             m_More.gameObject.SetActive(false);
+            m_Clear = UIKit.Button(root, "Clear", 892, 730, 144, 60, "Clear room", 20, ClearRoom);
             UIKit.Button(root, "Hide", 1052, 730, 192, 60, "Hide  (A)", 20, Hide);
             m_Hint = UIKit.Text(root, "Hint", 36, 794, 1208, 24, "Hold X and talk: \"black leather sofa\", \"anything cheaper?\", \"add the second one\"  •  Trigger: select / drag  •  B: delete", 16, UIKit.Muted, TextAlignmentOptions.Center);
 
             SetContent(m_Message);
             UpdateHeaderMode();
+        }
+
+        /// <summary>Removes every placed item; needs a second press within 3 s so it can't happen by accident.</summary>
+        void ClearRoom()
+        {
+            var fm = FurnitureManager.Instance;
+            if (fm == null || fm.Items.Count == 0) { Toast.Show("Room is already empty", 2); return; }
+            if (Time.time > m_ClearArmedUntil)
+            {
+                m_ClearArmedUntil = Time.time + 3f;
+                m_Clear.Label.text = "Sure?";
+                Invoke(nameof(DisarmClear), 3f);
+                return;
+            }
+            CancelInvoke(nameof(DisarmClear));
+            DisarmClear();
+            var n = fm.Items.Count;
+            fm.ClearAll();
+            Toast.Show($"Cleared {n} item{(n == 1 ? "" : "s")}", 2);
+        }
+
+        void DisarmClear()
+        {
+            m_ClearArmedUntil = 0;
+            m_Clear.Label.text = "Clear room";
         }
 
         void SetContent(RectTransform which)
