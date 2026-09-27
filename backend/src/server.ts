@@ -6,7 +6,7 @@ import sharp from 'sharp';
 import { baseUrl, capabilities, config, PUBLIC_DIR } from './config.js';
 import { dirs, getProduct, getSession, hash, listSessions, saveSession, updateProduct, upsertProduct } from './store.js';
 import { createSession, expandSession, sessionAsk, sessionSearch, setBrowse, setCartQty } from './session.js';
-import { inventoryProduct, inventoryStats } from './inventory/inventory.js';
+import { inventoryProduct, inventoryStats, setInventoryCategory } from './inventory/inventory.js';
 import { pullCatalog, pullStatus, planShoppingQueries, type PullTier } from './inventory/pull.js';
 import { liveSearchBudgetLeft, shoppingCallsThisMonth } from './inventory/usage.js';
 import { COLORS, MATERIALS, STYLES } from './inventory/attributes.js';
@@ -193,7 +193,7 @@ app.post('/api/sessions/:id/layout', (req, res) => {
     .filter((p): p is NonNullable<typeof p> => !!p)
     .map((p) => {
       const cat = s.categories.find((c) => c.productIds.includes(p.id));
-      return { productId: p.id, category: p.category, dims: p.dims ?? categoryDef(p.category).dims, anchor: cat?.placement.anchor, near: cat?.placement.near };
+      return { productId: p.id, category: p.category, dims: p.dims ?? categoryDef(p.category).dims, anchor: cat?.placement.anchor, near: cat?.placement.near, isSet: /\bchairs?\b/i.test(p.title) && p.category === 'dining_table' };
     });
   // Replacements stand in their real piece's spot (the headset sends where they are now); the rest arranges around them.
   const replaced = Object.values(s.realFurniture ?? {}).filter((p) => p.state === 'replace');
@@ -329,6 +329,34 @@ app.post('/api/catalog/pull', (req, res) => {
 // ---------------------------------------------------------------------------- products & models
 app.get('/api/products/:id', (req, res) => {
   res.json(need(getProduct(String(req.params.id)), 'Product'));
+});
+
+// Build one product's 3D model on purpose, from curated photos and real dimensions (the way to use paid generation in
+// 3D-only demo mode). Body: { images?: string[] (clean product shots, best first, up to 5), dims?: {w,d,h} (m),
+// model?: 'rodin' | 'trellis2' | 'hunyuan', productUrl?, force?, photoOnly? }. photoOnly: free — rugs and wall art
+// become flat pieces wearing the (curated) photo at true size, no generation.
+app.post('/api/products/:id/model/build', (req, res) => {
+  // Catalog products no room has shown yet are fine too.
+  const id = String(req.params.id);
+  const fromCatalog = inventoryProduct(id);
+  const p = need(getProduct(id) ?? (fromCatalog ? upsertProduct({ ...fromCatalog }) : undefined), 'Product');
+  const b = req.body ?? {};
+  if (!b.photoOnly && config.gen.provider === 'none') return void res.status(400).json({ error: 'No image-to-3D provider: set FAL_KEY (or MESHY_API_KEY / TRIPO_API_KEY)' });
+  const patch: Record<string, unknown> = {};
+  const images = Array.isArray(b.images) ? b.images.filter((u: unknown) => typeof u === 'string' && /^https?:\/\//.test(u)).slice(0, 5) : [];
+  if (images.length) patch.genImages = images;
+  const d = b.dims;
+  // Thin things are real too (a rug is ~1 cm, a poster ~3 cm deep), so only guard against nonsense.
+  if (d && [d.w, d.d, d.h].every((x: unknown) => typeof x === 'number' && x >= 0.003 && x < 6)) { patch.dims = { w: d.w, d: d.d, h: d.h }; patch.dimsSource = 'listing'; }
+  if (typeof b.model === 'string' && ['rodin', 'trellis2', 'hunyuan'].includes(b.model)) patch.genModel = b.model;
+  if (typeof b.category === 'string' && CATEGORIES.some((c) => c.key === b.category)) { patch.category = b.category; setInventoryCategory(p.id, b.category); }
+  if (typeof b.productUrl === 'string' && /^https?:\/\//.test(b.productUrl)) { patch.productUrl = b.productUrl; patch.storeLinkResolved = true; }
+  if (Object.keys(patch).length) updateProduct(p.id, patch);
+  const model = b.photoOnly
+    ? ensureModel(p.id, { allowGenerate: false, rebuild: true })
+    : ensureModel(p.id, { allowGenerate: true, explicit: true, force: b.force === true });
+  log.info('model', `${p.id}: build requested (${images.length || 'listing'} photo(s), ${patch.genModel ?? config.gen.falModel})`);
+  res.json({ ...getProduct(p.id), model });
 });
 
 app.post('/api/products/:id/model', (req, res) => {

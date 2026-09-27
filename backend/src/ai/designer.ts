@@ -2,6 +2,7 @@ import { config } from '../config.js';
 import { CATEGORIES, categoryDef, normalizeCategory } from '../catalog.js';
 import { log, errMsg } from '../util/log.js';
 import type { Product, Recommendation, RoomAnalysis } from '../types.js';
+import { expandTheme } from '../inventory/themes.js';
 import { chatJson, hasOpenAI, photoDataUrl, type ChatMessage } from './openai.js';
 
 const CATEGORY_KEYS = CATEGORIES.map((c) => c.key);
@@ -38,6 +39,7 @@ const ROOM_SCHEMA = obj({
       maxDepthM: num,
       maxHeightM: num,
       budget: num,
+      theme: arr(str),
       anchor: { type: 'string', enum: ['wall', 'corner', 'center', 'window', 'near'] },
       near: str,
     }),
@@ -61,7 +63,16 @@ Rules:
 - budget: suggested spend in USD for that item; the total should respect the user's budget if one is given.
 - anchor: where it goes (wall, corner, center, window, near) and near: which existing thing it goes near ("" if none).
 - lighting.brightness 0..1, lighting.kelvin e.g. 2700 warm .. 6500 cool.
-- estimatedSizeM: rough room size from the photos with confidence 0..1 (the headset measures the real size later).`;
+- estimatedSizeM: rough room size from the photos with confidence 0..1 (the headset measures the real size later).
+- theme: when the user asks for a motif, character or franchise (race cars / Disney Cars, dinosaurs, outer space, unicorns,
+  a sports team...), give the items that should visibly carry it (typically the bed, rug, wall art, a lamp, toy storage)
+  2-5 words a matching product would have in its title, most specific first, e.g. ["lightning mcqueen", "disney cars",
+  "race car", "racing"]. Use unambiguous terms ("outer space", "rocket", "astronaut", not "space" which matches "space
+  saving"). Put the theme words in that item's query too ("race car twin bed kids"). Items that stay plain (dresser,
+  bookshelf) and rooms without a theme get []. Styles like "modern" or "cozy" are not themes.
+- A themed child's room feels complete with: the bed, a rug, wall art, a table lamp (category table_lamp; it stands on
+  the kids table or a nightstand) and a kids table and chairs set (category dining_table), all carrying the theme;
+  storage (dresser, bookshelf, toy box) can stay plain.`;
 
 export async function analyzeRoom(photoPaths: string[], wish: string, budget: number | null): Promise<RoomAnalysis> {
   if (!hasOpenAI()) return heuristicAnalysis(wish, budget);
@@ -98,6 +109,7 @@ export async function analyzeRoom(photoPaths: string[], wish: string, budget: nu
           priority: x.priority,
           maxDims: x.maxWidthM > 0 ? { w: x.maxWidthM, d: x.maxDepthM, h: x.maxHeightM } : undefined,
           budget: x.budget > 0 ? x.budget : undefined,
+          theme: expandTheme(themeTerms(x.theme)),
           placement: { anchor: x.anchor, near: x.near || undefined },
         }),
       ).sort((a: Recommendation, b: Recommendation) => a.priority - b.priority),
@@ -107,6 +119,12 @@ export async function analyzeRoom(photoPaths: string[], wish: string, budget: nu
     log.error('designer', `room analysis failed, using heuristic: ${errMsg(e)}`);
     return heuristicAnalysis(wish, budget);
   }
+}
+
+/** Clean theme words from the model: lowercase, 2-40 chars, at most 5; undefined when there's no theme. */
+function themeTerms(v: unknown): string[] | undefined {
+  const t = Array.isArray(v) ? [...new Set(v.map((x) => String(x).trim().toLowerCase()).filter((x) => x.length > 1 && x.length < 40))].slice(0, 5) : [];
+  return t.length ? t : undefined;
 }
 
 // ------------------------------------------------------------------------------------------

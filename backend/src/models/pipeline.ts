@@ -35,15 +35,18 @@ function setModel(id: string, patch: Partial<ModelInfo>) {
   updateProduct(id, { model: { ...p.model, ...patch } });
 }
 
-/** Kick off (or report) model preparation. `allowGenerate` = false only uses free sources. */
-export function ensureModel(productId: string, opts: { allowGenerate?: boolean } = {}): ModelInfo {
+/**
+ * Kick off (or report) model preparation. `allowGenerate` = false only uses free sources. In 3D-only demo mode paid
+ * generation only runs for `explicit` builds (npm run model:build); `force` rebuilds a generated model.
+ */
+export function ensureModel(productId: string, opts: { allowGenerate?: boolean; explicit?: boolean; force?: boolean; rebuild?: boolean } = {}): ModelInfo {
   const p = getProduct(productId);
   if (!p) throw new Error(`Unknown product ${productId}`);
   const allowGenerate = opts.allowGenerate ?? true;
-  const canGenerate = allowGenerate && config.gen.provider !== 'none';
+  const canGenerate = allowGenerate && config.gen.provider !== 'none' && (config.gen.auto || !!opts.explicit);
   // A stand-in is only a placeholder: upgrade it when generation is requested and available.
-  const upgrade = p.model.kind === 'standin' && canGenerate;
-  if (p.model.status === 'ready' && fs.existsSync(modelFile(productId)) && !upgrade) return p.model;
+  const upgrade = (p.model.kind === 'standin' || (opts.force && p.model.kind === 'generated')) && canGenerate;
+  if (p.model.status === 'ready' && fs.existsSync(modelFile(productId)) && !upgrade && !opts.rebuild) return p.model;
   if (running.has(productId) || queue.some((q) => q.id === productId)) return p.model;
   const heavy = canGenerate;
   setModel(productId, { status: 'queued', progress: 0, message: 'Queued' });
@@ -96,9 +99,10 @@ async function prepare(id: string, allowGenerate: boolean) {
   // 2) Image -> 3D
   if (allowGenerate && config.gen.provider !== 'none') {
     try {
-      const imageUrl = await bestImage(p);
-      setModel(id, { progress: 0.1, message: `Generating 3D (${config.gen.provider})` });
-      const raw = await generateModel(imageUrl, { dims, category: p.category, title: p.title }, (f, msg) =>
+      const images = await bestImages(p);
+      const fresh = getProduct(id) ?? p;
+      setModel(id, { progress: 0.1, message: `Generating 3D (${config.gen.provider}${fresh.genModel ? ` ${fresh.genModel}` : ''}, ${images.length} photo${images.length === 1 ? '' : 's'})` });
+      const raw = await generateModel(images, { dims, category: p.category, title: p.title, falModel: fresh.genModel }, (f, msg) =>
         setModel(id, { progress: 0.1 + f * 0.75, message: msg ?? 'Generating 3D' }),
       );
       fs.writeFileSync(path.join(dirs.raw, `${id}.glb`), raw);
@@ -113,7 +117,9 @@ async function prepare(id: string, allowGenerate: boolean) {
   // 3) Stand-in
   setModel(id, { progress: 0.5, message: 'Building stand-in' });
   let img: Buffer | null = null;
-  try { img = await fetchBuffer(p.imageUrl, { headers: { 'User-Agent': BROWSER_UA }, timeoutMs: 15000 }); } catch { /* tint fallback */ }
+  // Rugs and wall art wear this photo: a curated full-size shot beats the listing thumbnail.
+  const photo = (getProduct(id) ?? p).genImages?.[0] ?? p.imageUrl;
+  try { img = await fetchBuffer(photo, { headers: { 'User-Agent': BROWSER_UA }, timeoutMs: 15000 }); } catch { /* tint fallback */ }
   const glb = await buildStandin({ category: p.category, dims, imageBuffer: img, color: (await dominantColor(img)) ?? undefined });
   return finish(id, glb, 'standin', dims, getProduct(id)!.dimsSource ?? 'estimated', undefined, t0, []);
 }
@@ -145,6 +151,13 @@ async function resolveDims(p: Product): Promise<Dims> {
   }
   updateProduct(p.id, { dims, dimsSource: source });
   return dims;
+}
+
+/** Photos to generate from: curated ones (clean product shots, several angles) if set, else the best listing image. */
+async function bestImages(p: Product): Promise<string[]> {
+  const fresh = getProduct(p.id) ?? p;
+  if (fresh.genImages?.length) return fresh.genImages.slice(0, 5);
+  return [await bestImage(p)];
 }
 
 async function bestImage(p: Product): Promise<string> {

@@ -4,8 +4,10 @@ Passthrough shows the user's real room, so virtual furniture used to pass straig
 box from the Quest's **Space Setup** (couch, table, bed, storage, lamp, plant...) is a *real piece* the user can
 **keep** or **replace**.
 
-- **Keep** (the default): the piece is solid.
-  - Dragging slides a virtual item along it (with a small haptic bump) instead of into it.
+- **Keep** (the default): nothing virtual ends up inside the piece.
+  - While dragging, an item can pass through it: it's outlined red, with a light buzz as it enters. Let go there and
+    it glides to the nearest free spot. Turning an item into it works the same way: it slides clear when you let go
+    of the stick. Walls always stop it.
   - New items start in the nearest free spot.
   - "Design my room" arranges around it, and doesn't suggest a second sofa next to your couch.
   - Virtual items behind it are hidden by it, as before.

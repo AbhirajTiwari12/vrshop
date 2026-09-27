@@ -83,6 +83,8 @@ export function upsertProduct(p: Product): Product {
     p.model = existing.model.status !== 'none' ? existing.model : p.model;
     p.dims = existing.dims ?? p.dims;
     p.dimsSource = existing.dimsSource ?? p.dimsSource;
+    p.genImages = existing.genImages ?? p.genImages;
+    p.genModel = existing.genModel ?? p.genModel;
     if (existing.storeLinkResolved) {
       p.productUrl = existing.productUrl;
       p.storeLinkResolved = true;

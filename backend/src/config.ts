@@ -15,7 +15,6 @@ export type GenProvider = 'fal' | 'meshy' | 'tripo' | 'none';
 const demo3dOnly = ['on', 'true', '1'].includes(env('DEMO_3D_ONLY', 'off').toLowerCase());
 
 function pickGenProvider(): GenProvider {
-  if (demo3dOnly) return 'none'; // demo mode never pays for generation (e.g. when an IKEA download fails)
   const wanted = env('GEN_PROVIDER', 'auto').toLowerCase();
   const has = { fal: !!env('FAL_KEY'), meshy: !!env('MESHY_API_KEY'), tripo: !!env('TRIPO_API_KEY') };
   if (wanted === 'none') return 'none';
@@ -92,6 +91,8 @@ export const config = {
   },
   gen: {
     provider: pickGenProvider(),
+    // Demo mode never generates on its own (e.g. when an IKEA download fails); only explicit builds (npm run model:build).
+    auto: !demo3dOnly,
     falKey: env('FAL_KEY'),
     falModel: env('FAL_MODEL', 'trellis2'),
     meshyKey: env('MESHY_API_KEY'),
@@ -120,6 +121,6 @@ export function capabilities() {
     serpapi: config.shopping.provider !== 'none', // "Google Shopping available" (via Serper.dev or SerpAPI)
     shopping: config.shopping.provider,
     ikea: true,
-    generator: config.gen.provider,
+    generator: config.gen.auto ? config.gen.provider : 'none', // demo mode: only explicit builds (npm run model:build)
   };
 }

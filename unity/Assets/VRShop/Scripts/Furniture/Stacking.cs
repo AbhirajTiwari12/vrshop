@@ -88,6 +88,8 @@ namespace VRShop.Furniture
         public static Top? TopOf(FurnitureItem item)
         {
             if (item == null || item.Dims == null || !StackRules.IsTop(item.Product.category)) return null;
+            // A table-and-chairs set measures to its chair backs, not the tabletop: nothing stands "on" it.
+            if (item.Product.category == "dining_table" && System.Text.RegularExpressions.Regex.IsMatch(item.Product.title ?? "", @"\bchairs?\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) return null;
             return new Top { item = item, y = item.transform.position.y + item.Dims.h, footprint = Obb.Of(item.transform, item.Dims.w, item.Dims.d) };
         }
 

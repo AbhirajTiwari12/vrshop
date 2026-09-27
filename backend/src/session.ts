@@ -72,10 +72,41 @@ export async function searchCategory(room: RoomAnalysis, rec: Recommendation, or
   const priceCap = maxPrice ?? (rec.budget ? rec.budget * 1.6 : undefined);
 
   // The pulled catalog first (free). Only search live stores when it has too little for this category.
-  const local = queryInventory(
-    { category, maxPrice: priceCap ? priceCap * 1.25 : undefined, maxWidthM: rec.maxDims ? Math.max(rec.maxDims.w, rec.maxDims.d) * 1.15 : undefined, maxHeightM: rec.maxDims ? rec.maxDims.h * 1.2 : undefined },
-    { limit: 22, boostText: `${rec.query} ${room.styleTags.join(' ')}` },
-  ).products.map((p) => ({ ...p }));
+  const base: Filters = { category, maxPrice: priceCap ? priceCap * 1.25 : undefined, maxWidthM: rec.maxDims ? Math.max(rec.maxDims.w, rec.maxDims.d) * 1.15 : undefined, maxHeightM: rec.maxDims ? rec.maxDims.h * 1.2 : undefined };
+  const boostText = `${rec.query} ${room.styleTags.join(' ')}`;
+  const local = queryInventory(base, { limit: 22, boostText }).products.map((p) => ({ ...p }));
+
+  // A themed item ("race car bed"): the products must show the theme. The catalog is mostly generic, so this usually
+  // means a store search: IKEA (free), then one Google Shopping search for this item (remembered, so repeating the
+  // same room costs nothing). Themed products lead; the best plain 3D ones follow as alternatives.
+  if (rec.theme?.length) {
+    const themed = await themedCandidates(rec, category, base, priceCap, boostText);
+    if (themed.length) {
+      // Pieces prepared on purpose (curated photos, built 3D models) lead their row, so "Design my room" shows them.
+      const prepared = (p: Product) => { const s = getProduct(p.id); return s?.genImages?.length ? 0 : 1; };
+      const byAi = await rankProducts(room, rec, themed, 6);
+      const ranked = [...themed.filter((p) => prepared(p) === 0 && !byAi.some((r) => r.id === p.id)), ...byAi]
+        .sort((a, b) => prepared(a) - prepared(b)).slice(0, 6);
+      const alternatives = (config.demo3dOnly ? await withOfficialModels(local) : local).filter((p) => !ranked.some((r) => r.id === p.id)).slice(0, 2);
+      for (const p of alternatives) p.why ??= 'A plain alternative with an official 3D model';
+      const stored = [...ranked, ...alternatives].map((p) => upsertProduct({ ...p, category }));
+      log.info('session', `${category}: ${ranked.length} themed (${rec.theme.slice(0, 2).join(' / ')}) + ${alternatives.length} plain`);
+      return {
+        category,
+        label: rec.label || categoryDef(category).label,
+        query: rec.query,
+        why: rec.why,
+        placement: rec.placement ?? { anchor: categoryDef(category).anchor },
+        productIds: stored.map((p) => p.id),
+        origin,
+        theme: rec.theme,
+      };
+    }
+    // Nothing carries the theme (store search off, failed or out of budget): plain picks, without promising the theme.
+    log.info('session', `${category}: no products show "${rec.theme[0]}"; using plain ones`);
+    rec = { ...rec, label: categoryDef(category).label };
+  }
+
   let ikeaFiltered: Product[];
   let pool: Product[];
   if (local.length >= 10) {
@@ -121,6 +152,42 @@ export async function searchCategory(room: RoomAnalysis, rec: Recommendation, or
     productIds: stored.map((p) => p.id),
     origin,
   };
+}
+
+/** Catalog products showing the theme; if fewer than 6, search IKEA and then Google Shopping once (cached per query). */
+async function themedCandidates(rec: Recommendation, category: string, base: Filters, priceCap: number | undefined, boostText: string): Promise<Product[]> {
+  const f: Filters = { ...base, theme: rec.theme };
+  let found = queryInventory(f, { limit: 24, boostText }).products;
+  if (found.length >= 6) return withPrepared(f, preferRetailers(found)).map((p) => ({ ...p }));
+  const noun = categoryDef(category).label.toLowerCase().replace(/ \/.*$/, '');
+  const ikeaQ = `${rec.theme![0]} ${noun}`;
+  const ikeaKey = queryKey('ikea', ikeaQ);
+  if (!hasQuery(ikeaKey, 14 * 86400e3)) {
+    const ikea = await searchIkea(ikeaQ, 60).catch(() => []);
+    recordQuery(ikeaKey, addProducts(ikea, category).kept.length, 'live');
+  }
+  const shopKey = queryKey(config.shopping.provider, rec.query);
+  if (queryInventory(f, { limit: 6 }).total < 6 && !hasQuery(shopKey, 14 * 86400e3)) {
+    const shop = await trySearchShopping(rec.query, { maxPrice: priceCap, limit: 60, themed: true });
+    if (shop) recordQuery(shopKey, addProducts(shop, category).kept.length, 'live');
+    log.info('session', `themed search "${rec.query}": ${shop ? `${shop.length} listings` : 'skipped'}`);
+  }
+  found = queryInventory(f, { limit: 24, boostText }).products;
+  return withPrepared(f, preferRetailers(found)).map((p) => ({ ...p }));
+}
+
+/** Pieces prepared on purpose (curated photos / built models) always make the candidate list. */
+function withPrepared(f: Filters, found: Product[]): Product[] {
+  // Prepared on purpose, so the row's price target doesn't apply (a $170 race-car lamp for a $50 lamp slot).
+  const extra = allMatches({ ...f, minPrice: undefined, maxPrice: undefined }).filter((p) => getProduct(p.id)?.genImages?.length && !found.some((x) => x.id === p.id));
+  return [...extra, ...found];
+}
+
+/** Used / resale marketplaces (eBay, Poshmark...) only when real retailers don't have enough of it. */
+const MARKETPLACE = /\b(ebay|poshmark|mercari|offerup|thredup|depop|facebook|tiktok)\b/i;
+export function preferRetailers(ps: Product[], enough = 4): Product[] {
+  const retail = ps.filter((p) => !MARKETPLACE.test(p.store));
+  return retail.length >= enough ? retail : [...retail, ...ps.filter((p) => MARKETPLACE.test(p.store))];
 }
 
 /** Prepare free models (IKEA official + stand-ins) for the top picks so "Place" is instant. */
@@ -191,11 +258,15 @@ export function setCartQty(id: string, productId: string, qty: number): Session 
 
 /** Query text for a live store search built from the filters: "black leather sofa". */
 function liveQuery(f: Filters): { shopping: string; ikea: string } | null {
-  if (!f.category && !f.keywords?.length) return null; // too vague to be worth a paid search
+  if (!f.category && !f.keywords?.length && !f.theme?.length) return null; // too vague to be worth a paid search
   const noun = f.category ? categoryDef(f.category).label.toLowerCase().replace(/ \/.*$/, '') : '';
-  const words = [f.colors?.[0], f.materials?.[0], f.styles?.[0], ...(f.keywords ?? []), noun].filter(Boolean);
-  return { shopping: words.join(' '), ikea: [f.colors?.[0], ...(f.keywords ?? []).slice(0, 1), noun].filter(Boolean).join(' ') };
+  const theme = f.theme?.[0];
+  const words = [theme, f.colors?.[0], f.materials?.[0], f.styles?.[0], ...(f.keywords ?? []), noun].filter(Boolean);
+  return { shopping: words.join(' '), ikea: [theme, f.colors?.[0], ...(f.keywords ?? []).slice(0, 1), noun].filter(Boolean).join(' ') };
 }
+
+/** Themed requests want a real choice (the catalog is mostly generic); plain ones only search when nothing matches. */
+const liveMinResults = (f: Filters) => (f.theme?.length ? 6 : config.shopping.liveMinResults);
 
 /** Search IKEA (free) + Google Shopping (paid, capped per month) for the filters and add results to the catalog. */
 async function liveTopUp(f: Filters): Promise<string | undefined> {
@@ -212,10 +283,10 @@ async function liveTopUp(f: Filters): Promise<string | undefined> {
     if (f.only3d || config.demo3dOnly) await checkOfficialModels(kept.map((p) => inventoryProduct(p.id) ?? p));
     searched = true;
     log.info('browse', `live top-up "${q.ikea}": IKEA ${ikea.length}`);
-    if (queryInventory(f, { limit: 1 }).total >= config.shopping.liveMinResults) return q.shopping;
+    if (queryInventory(f, { limit: 1 }).total >= liveMinResults(f)) return q.shopping;
   }
   if (!hasQuery(shopKey, 3 * 86400e3)) {
-    const shop = await trySearchShopping(q.shopping, { maxPrice: f.maxPrice ? f.maxPrice * 1.1 : undefined, limit: 60 });
+    const shop = await trySearchShopping(q.shopping, { maxPrice: f.maxPrice ? f.maxPrice * 1.1 : undefined, limit: 60, themed: !!f.theme?.length });
     if (shop) {
       recordQuery(shopKey, addProducts(shop, f.category).kept.length, 'live');
       searched = true;
@@ -231,7 +302,7 @@ export async function setBrowse(id: string, raw: unknown, opts: { live?: boolean
   const filters = normalizeFilters(raw);
   let r = queryInventory(filters, { limit: 48 });
   let liveSearched: string | undefined;
-  if (opts.live && config.shopping.liveMode !== 'off' && r.total < config.shopping.liveMinResults) {
+  if (opts.live && config.shopping.liveMode !== 'off' && r.total < liveMinResults(filters)) {
     liveSearched = await liveTopUp(filters);
     if (liveSearched) r = queryInventory(filters, { limit: 48 });
   }

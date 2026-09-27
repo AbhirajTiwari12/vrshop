@@ -7,25 +7,26 @@ import type { GenContext, Progress } from './index.js';
 
 const auth = () => ({ Authorization: `Key ${config.gen.falKey}`, 'Content-Type': 'application/json' });
 
-interface FalModel { id: string; input: (img: string, ctx: GenContext) => object; glb: (out: any) => string | undefined; expectSec: number }
+interface FalModel { id: string; input: (images: string[], ctx: GenContext) => object; glb: (out: any) => string | undefined; expectSec: number }
 
 const MODELS: Record<string, FalModel> = {
   trellis2: {
     id: 'fal-ai/trellis-2',
-    input: (image_url) => ({ image_url, resolution: 1024, texture_size: 2048, decimation_target: 60000, remesh: true }),
+    input: (images) => ({ image_url: images[0], resolution: 1024, texture_size: 2048, decimation_target: 60000, remesh: true }),
     glb: (o) => o?.model_glb?.url,
     expectSec: 45,
   },
   hunyuan: {
     id: 'fal-ai/hunyuan-3d/v3.1/pro/image-to-3d',
-    input: (input_image_url) => ({ input_image_url, generate_type: 'Normal', enable_pbr: true, face_count: 60000 }),
+    input: (images) => ({ input_image_url: images[0], generate_type: 'Normal', enable_pbr: true, face_count: 60000 }),
     glb: (o) => o?.model_glb?.url ?? o?.model_urls?.glb?.url ?? o?.model_urls?.glb,
     expectSec: 90,
   },
   rodin: {
     id: 'fal-ai/hyper3d/rodin/v2',
-    input: (img, ctx) => ({
-      input_image_urls: [img],
+    // Several angles of the same product (up to 5) sharpen the shape; the first is the main view.
+    input: (images, ctx) => ({
+      input_image_urls: images.slice(0, 5),
       geometry_file_format: 'glb',
       material: 'PBR',
       quality_mesh_option: '20K Triangle',
@@ -37,9 +38,9 @@ const MODELS: Record<string, FalModel> = {
   },
 };
 
-export async function generateFal(imageUrl: string, ctx: GenContext, onProgress: Progress): Promise<Buffer> {
-  const m = MODELS[config.gen.falModel] ?? MODELS.trellis2;
-  const sub = await fetchJson<any>(`https://queue.fal.run/${m.id}`, { method: 'POST', headers: auth(), body: JSON.stringify(m.input(imageUrl, ctx)), timeoutMs: 30000 });
+export async function generateFal(images: string[], ctx: GenContext, onProgress: Progress): Promise<Buffer> {
+  const m = MODELS[ctx.falModel ?? config.gen.falModel] ?? MODELS.trellis2;
+  const sub = await fetchJson<any>(`https://queue.fal.run/${m.id}`, { method: 'POST', headers: auth(), body: JSON.stringify(m.input(images, ctx)), timeoutMs: 30000 });
   const statusUrl: string = sub.status_url ?? `https://queue.fal.run/${m.id}/requests/${sub.request_id}/status`;
   const responseUrl: string = sub.response_url ?? `https://queue.fal.run/${m.id}/requests/${sub.request_id}`;
   const started = Date.now();

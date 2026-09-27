@@ -9,8 +9,9 @@ namespace VRShop.Interaction
 {
     /// <summary>
     /// Select, drag, rotate, wall-snap and delete placed furniture, with a live fit check:
-    ///  - trigger (or grip) on an item + move = slide it along the floor (wall art slides along walls). The user's
-    ///    real furniture (kept pieces) and the walls are solid: an item slides along them and never ends up inside.
+    ///  - trigger (or grip) on an item + move = slide it along the floor (wall art slides along walls). It can pass
+    ///    through the user's real furniture while moving (red outline + a small buzz); let go inside it and it glides
+    ///    to the nearest free spot. Walls stop it.
     ///  - right thumbstick left/right = rotate the selected item
     ///  - release near a wall = snaps flush with its back to the wall
     ///  - B = delete selected
@@ -31,6 +32,8 @@ namespace VRShop.Interaction
         float m_PressTime;
         float m_NextFit;
         bool m_Blocked;
+        bool m_InReal;        // currently overlapping a real piece (for the entry buzz)
+        bool m_Turning;       // the stick is turning the selected item
         bool m_Stackable;     // a table lamp / small plant: can go on tops
         Top? m_OnTop;         // the top it's being dragged across, if any
 
@@ -83,7 +86,7 @@ namespace VRShop.Interaction
                 {
                     if (m_Stackable) item.transform.position = new Vector3(p.x, RoomService.Instance != null ? RoomService.Instance.FloorY : p.y, p.z);
                     SnapToWall(item);
-                    KeepOutOfSolids(item);
+                    SlideClearOfRealFurniture(item);
                 }
                 item.SetStatusNote(null);
             }
@@ -121,10 +124,11 @@ namespace VRShop.Interaction
                             m_OnTop = top;
                             var from = m_Drag.transform.position;
                             var next = Vector3.Lerp(from, m_Target, 1 - Mathf.Exp(-Time.deltaTime * 18));
-                            // On the floor the real furniture and walls are solid; on a top it just stays within the edges.
-                            if (!top.HasValue) next = Solid(m_Drag, from, next);
+                            // On the floor the walls stop it; real furniture doesn't (red outline, sorted out on release).
+                            if (!top.HasValue) next = Walls(m_Drag, from, next);
                             m_Drag.transform.position = next;
                             m_Drag.SetStatusNote(note);
+                            BuzzOnEnteringRealFurniture(m_Drag);
                         }
                     }
                 }
@@ -138,9 +142,15 @@ namespace VRShop.Interaction
                 {
                     Selected.transform.Rotate(0, stick.x * 110f * Time.deltaTime, 0, Space.World);
                     Selected.UserMoved = true;
+                    m_Turning = true;
                     if (Selected.IsResting) Stacking.Settle(Selected); // stay within the top's edges
-                    else KeepOutOfSolids(Selected);                     // turning a long sofa can swing it into the real couch
                     FurnitureManager.Instance?.ScheduleSync();
+                }
+                else if (m_Turning && Mathf.Abs(stick.x) < 0.15f)
+                {
+                    // Let go of the stick: if the turn swung it into real furniture, it slides clear now.
+                    m_Turning = false;
+                    if (m_Drag == null) SlideClearOfRealFurniture(Selected);
                 }
                 if (input.Down(Btn.B))
                 {
@@ -184,27 +194,46 @@ namespace VRShop.Interaction
             return fp.HasValue ? fp.Value + m_Offset : (Vector3?)null;
         }
 
-        /// <summary>The user's kept real furniture and the walls are solid: slide along them instead of going in.</summary>
-        Vector3 Solid(FurnitureItem item, Vector3 from, Vector3 to)
+        /// <summary>The walls stop a dragged item: it slides along them instead of leaving the room.</summary>
+        Vector3 Walls(FurnitureItem item, Vector3 from, Vector3 to)
         {
             var rf = RealFurniture.Instance;
             if (rf == null || item.Dims == null || item.IsWallMounted) return to;
             var shape = Obb.Of(item.transform, item.Dims.w, item.Dims.d);
-            // Rugs lie under furniture, so only the walls stop them.
-            var solids = item.IsFloorLayer ? new List<Obb>() : rf.Solids();
-            var p = FootprintSolver.Sweep(from, to, shape, solids, rf.Walls);
+            var p = FootprintSolver.Sweep(from, to, shape, k_NoSolids, rf.Walls);
             var blocked = (p - to).sqrMagnitude > 0.0004f;
-            if (blocked && !m_Blocked) XRInput.Instance?.Haptic(m_Hand, 0.25f, 0.03f); // a soft bump when it meets something solid
+            if (blocked && !m_Blocked) XRInput.Instance?.Haptic(m_Hand, 0.25f, 0.03f); // a soft bump at the wall
             m_Blocked = blocked;
             return p;
         }
 
-        void KeepOutOfSolids(FurnitureItem item)
+        static readonly List<Obb> k_NoSolids = new List<Obb>();
+
+        /// <summary>A light buzz as a dragged item starts to overlap real furniture (it's outlined red while it does).</summary>
+        void BuzzOnEnteringRealFurniture(FurnitureItem item)
         {
             var rf = RealFurniture.Instance;
-            if (rf == null || item == null || item.Dims == null || item.IsWallMounted || item.IsResting) return;
-            var shape = Obb.Of(item.transform, item.Dims.w, item.Dims.d);
-            item.transform.position = FootprintSolver.Resolve(item.transform.position, shape, item.IsFloorLayer ? new List<Obb>() : rf.Solids(), rf.Walls);
+            if (rf == null || item.Dims == null || item.IsWallMounted || item.IsFloorLayer) { m_InReal = false; return; }
+            var box = Obb.Of(item.transform, item.Dims.w, item.Dims.d);
+            var inReal = rf.Solids().Any(s => box.Overlaps(s));
+            if (inReal && !m_InReal) XRInput.Instance?.Haptic(m_Hand, 0.18f, 0.025f);
+            m_InReal = inReal;
+        }
+
+        /// <summary>Let go inside the user's real furniture: glide to the nearest spot that's clear of it.</summary>
+        public void SlideClearOfRealFurniture(FurnitureItem item)
+        {
+            m_InReal = false;
+            var rf = RealFurniture.Instance;
+            if (rf == null || item == null || item.Dims == null || item.IsWallMounted || item.IsFloorLayer || item.IsResting) return;
+            var pos = item.transform.position;
+            var yaw = item.transform.eulerAngles.y;
+            var box = Obb.Of(item.transform, item.Dims.w, item.Dims.d);
+            if (!rf.Solids().Any(s => box.Overlaps(s))) return;
+            var spot = rf.FreeSpot(pos, item.Dims.w, item.Dims.d, yaw, item);
+            if ((spot - pos).sqrMagnitude < 0.0001f) return;
+            FurnitureManager.Instance?.GlideTo(item, spot);
+            XRInput.Instance?.Haptic(m_Hand, 0.3f, 0.05f);
         }
 
         public static Vector3? FloorPoint(Ray r)

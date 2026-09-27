@@ -18,7 +18,12 @@ import { liveSearchBudgetLeft, recordShoppingCall } from '../inventory/usage.js'
 const SERP = 'https://serpapi.com/search.json';
 const SERPER = 'https://google.serper.dev/shopping';
 
-export interface ShoppingOpts { maxPrice?: number; limit?: number }
+export interface ShoppingOpts {
+  maxPrice?: number;
+  limit?: number;
+  /** A themed request ("race car bed"): allowed even in 3D-only demo mode, since the catalog can't have it. */
+  themed?: boolean;
+}
 
 export async function searchShopping(query: string, opts: ShoppingOpts = {}): Promise<Product[]> {
   return (await trySearchShopping(query, opts)) ?? [];
@@ -28,7 +33,7 @@ export async function searchShopping(query: string, opts: ShoppingOpts = {}): Pr
 export async function trySearchShopping(query: string, opts: ShoppingOpts = {}): Promise<Product[] | null> {
   const provider = config.shopping.provider;
   if (provider === 'none') return [];
-  if (config.demo3dOnly) {
+  if (config.demo3dOnly && !opts.themed) {
     log.info('shopping', `DEMO_3D_ONLY: skipped "${query}"`);
     return null;
   }
@@ -137,9 +142,11 @@ export interface ImmersiveDetails { storeUrl?: string; store?: string; price?: n
  *  automatically any more: the Google link still reaches the product and dims fall back to an AI estimate. */
 export async function immersiveDetails(pageToken: string): Promise<ImmersiveDetails | null> {
   if (!config.serpapiKey || !pageToken) return null;
+  if (liveSearchBudgetLeft() <= 0) { log.warn('serp', 'monthly limit reached; skipped product details'); return null; }
   const params = new URLSearchParams({ engine: 'google_immersive_product', page_token: pageToken, more_stores: 'true', api_key: config.serpapiKey });
   try {
     const data = await fetchJson<any>(`${SERP}?${params}`, { timeoutMs: 25000 });
+    recordShoppingCall('serpapi'); // a paid search like any other: counts toward the monthly cap
     const pr = data?.product_results ?? {};
     const stores: any[] = pr.stores ?? [];
     const best = stores.find((s) => s.link && !String(s.link).includes('google.')) ?? stores[0];

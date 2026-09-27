@@ -188,3 +188,14 @@ describe('stacking in layouts', () => {
     assert.match(tree.reason ?? '', /corner/);
   });
 });
+
+describe('layout fallbacks', () => {
+  it('finds open floor when the preferred spot is taken', () => {
+    const out = solveLayout(room([]), [
+      { productId: 'bed', category: 'bed', dims: { w: 1.2, d: 2.4, h: 0.6 } },
+      { productId: 'set', category: 'dining_table', dims: { w: 1.3, d: 0.66, h: 0.5 }, isSet: true },
+    ]);
+    const set = out.find((p) => p.productId === 'set')!;
+    assert.doesNotMatch(set.reason ?? '', /in front of you/);
+  });
+});

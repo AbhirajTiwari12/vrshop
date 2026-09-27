@@ -14,7 +14,7 @@ export interface CategoryDef {
 
 export const CATEGORIES: CategoryDef[] = [
   { key: 'sofa', label: 'Sofa', dims: { w: 2.1, d: 0.9, h: 0.85 }, shape: 'sofa', mount: 'floor', anchor: 'wall', keywords: ['sofa', 'couch', 'sectional', 'loveseat', 'settee', 'sofa bed', 'futon', 'chesterfield'] },
-  { key: 'armchair', label: 'Accent chair', dims: { w: 0.8, d: 0.85, h: 0.9 }, shape: 'chair', mount: 'floor', anchor: 'corner', keywords: ['armchair', 'accent chair', 'lounge chair', 'reading chair', 'recliner', 'club chair', 'wing chair', 'swivel chair', 'rocking chair', 'barrel chair', 'slipper chair', 'chair and a half', 'easy chair'] },
+  { key: 'armchair', label: 'Accent chair', dims: { w: 0.8, d: 0.85, h: 0.9 }, shape: 'chair', mount: 'floor', anchor: 'corner', keywords: ['armchair', 'accent chair', 'lounge chair', 'reading chair', 'recliner', 'club chair', 'wing chair', 'swivel chair', 'rocking chair', 'barrel chair', 'slipper chair', 'chair and a half', 'easy chair', 'kids chair', 'toddler chair', 'kids armchair', 'kids recliner', 'bean bag', 'bean bag chair', 'kids sofa', 'flip open sofa'] },
   { key: 'coffee_table', label: 'Coffee table', dims: { w: 1.1, d: 0.6, h: 0.45 }, shape: 'table', mount: 'floor', anchor: 'center', keywords: ['coffee table', 'cocktail table'] },
   { key: 'side_table', label: 'Side table', dims: { w: 0.5, d: 0.5, h: 0.55 }, shape: 'table', mount: 'floor', anchor: 'near', keywords: ['side table', 'end table', 'accent table', 'nesting tables', 'nesting table', 'c table', 'console table'] },
   { key: 'rug', label: 'Rug', dims: { w: 2.0, d: 1.4, h: 0.01 }, shape: 'rug', mount: 'floor', anchor: 'center', keywords: ['rug', 'carpet', 'area rug'] },
@@ -22,14 +22,14 @@ export const CATEGORIES: CategoryDef[] = [
   { key: 'table_lamp', label: 'Table lamp', dims: { w: 0.3, d: 0.3, h: 0.5 }, shape: 'lamp', mount: 'floor', anchor: 'near', keywords: ['table lamp', 'desk lamp', 'bedside lamp'] },
   { key: 'bookshelf', label: 'Bookshelf', dims: { w: 0.8, d: 0.3, h: 1.8 }, shape: 'shelf', mount: 'floor', anchor: 'wall', keywords: ['bookshelf', 'bookcase', 'shelving', 'shelf unit', 'shelving unit', 'etagere', 'ladder shelf'] },
   { key: 'tv_stand', label: 'TV stand', dims: { w: 1.6, d: 0.4, h: 0.5 }, shape: 'box', mount: 'floor', anchor: 'wall', keywords: ['tv stand', 'tv bench', 'media console', 'tv unit', 'entertainment center'] },
-  { key: 'dining_table', label: 'Dining table', dims: { w: 1.6, d: 0.9, h: 0.75 }, shape: 'table', mount: 'floor', anchor: 'center', keywords: ['dining table', 'kitchen table', 'dining set', 'table and 2 chairs', 'table and 4 chairs', 'table and 6 chairs', 'table and 4 armchairs', 'table and 2 benches'] },
+  { key: 'dining_table', label: 'Dining table', dims: { w: 1.6, d: 0.9, h: 0.75 }, shape: 'table', mount: 'floor', anchor: 'center', keywords: ['dining table', 'kitchen table', 'dining set', 'table and 2 chairs', 'table and 4 chairs', 'table and 6 chairs', 'table and 4 armchairs', 'table and 2 benches', 'table and chair set', 'table and chairs set', 'table & chair set', 'table and chairs', 'activity table', 'play table'] },
   { key: 'dining_chair', label: 'Dining chair', dims: { w: 0.45, d: 0.5, h: 0.85 }, shape: 'chair', mount: 'floor', anchor: 'near', keywords: ['dining chair', 'kitchen chair'] },
   { key: 'desk', label: 'Desk', dims: { w: 1.2, d: 0.6, h: 0.75 }, shape: 'table', mount: 'floor', anchor: 'wall', keywords: ['desk', 'writing desk', 'computer desk', 'workstation', 'standing desk'] },
   { key: 'office_chair', label: 'Desk chair', dims: { w: 0.65, d: 0.65, h: 1.1 }, shape: 'chair', mount: 'floor', anchor: 'near', keywords: ['office chair', 'desk chair', 'task chair', 'gaming chair'] },
   { key: 'bed', label: 'Bed', dims: { w: 1.6, d: 2.1, h: 1.0 }, shape: 'bed', mount: 'floor', anchor: 'wall', keywords: ['bed', 'bed frame', 'platform bed', 'daybed', 'upholstered bed', 'canopy bed'] },
   { key: 'nightstand', label: 'Nightstand', dims: { w: 0.45, d: 0.4, h: 0.55 }, shape: 'box', mount: 'floor', anchor: 'near', keywords: ['nightstand', 'bedside table', 'night stand'] },
   { key: 'dresser', label: 'Dresser', dims: { w: 1.2, d: 0.5, h: 0.8 }, shape: 'box', mount: 'floor', anchor: 'wall', keywords: ['dresser', 'chest of drawers', 'sideboard', 'credenza', 'buffet'] },
-  { key: 'cabinet', label: 'Cabinet', dims: { w: 0.8, d: 0.4, h: 1.0 }, shape: 'box', mount: 'floor', anchor: 'wall', keywords: ['cabinet', 'storage cabinet', 'wardrobe', 'armoire', 'display cabinet'] },
+  { key: 'cabinet', label: 'Cabinet', dims: { w: 0.8, d: 0.4, h: 1.0 }, shape: 'box', mount: 'floor', anchor: 'wall', keywords: ['cabinet', 'storage cabinet', 'wardrobe', 'armoire', 'display cabinet', 'toy box', 'toy chest', 'toy organizer', 'toy storage'] },
   { key: 'ottoman', label: 'Ottoman / pouf', dims: { w: 0.6, d: 0.6, h: 0.45 }, shape: 'cylinder', mount: 'floor', anchor: 'near', keywords: ['ottoman', 'pouf', 'footstool', 'footrest'] },
   { key: 'bench', label: 'Bench', dims: { w: 1.2, d: 0.4, h: 0.45 }, shape: 'box', mount: 'floor', anchor: 'wall', keywords: ['bench'] },
   { key: 'plant', label: 'Plant', dims: { w: 0.5, d: 0.5, h: 1.2 }, shape: 'plant', mount: 'floor', anchor: 'corner', keywords: ['plant', 'artificial plant', 'potted plant', 'faux plant', 'artificial tree', 'fiddle leaf', 'olive tree'] },
@@ -76,7 +76,7 @@ const ACC = '(covers?|cvr|slipcovers?|cushions?|pads?|legs?|feet|protectors?|tra
 const ACC_START = new RegExp(`^\\s*(?:[\\w-]+\\s+){0,2}${ACC}\\b`, 'i');     // "Cover for ...", "Stretch sofa cover"
 const ACC_FOR = new RegExp(`\\b${ACC}\\s+(?:for|to fit)\\b`, 'i');             // "... cushion for sofa"
 // Things store searches return that aren't furniture at all (looked for in the head of the title / IKEA type name).
-const NOT_FURNITURE = /\b(towels?|door ?mats?|bath mats?|place ?mats?|tablecloths?|oven mitts?|throws?|throw blankets?|duvets?|pillowcases?|clocks?|glass doors?|sliding doors?|mirror doors?|ledges?|holders?|laptop supports?|underframes?|table ?tops?|add-on units?|seat shells?|bases?|glass tops?|bouquets?|wreaths?|garlands?|artificial flowers?|flowers?|christmas|sprays?|plant pots?|plant stands?|lamp stands?|laptop stands?|monitor stands?|pockets?)\b/i;
+const NOT_FURNITURE = /\b(plush(ies)?|pillow ?buddy|pillowbuddy|soft pals|beanbag covers?|bean bag covers?|toy cars?|towels?|door ?mats?|bath mats?|place ?mats?|tablecloths?|oven mitts?|throws?|throw blankets?|duvets?|pillowcases?|clocks?|glass doors?|sliding doors?|mirror doors?|ledges?|holders?|laptop supports?|underframes?|table ?tops?|add-on units?|seat shells?|bases?|glass tops?|bouquets?|wreaths?|garlands?|artificial flowers?|flowers?|christmas|sprays?|plant pots?|plant stands?|lamp stands?|laptop stands?|monitor stands?|pockets?)\b/i;
 const OUTDOOR = /\b(outdoor|patio)\b/i;
 const IN_OUTDOOR = /\b(in ?\/ ?outdoor|indoor ?\/ ?outdoor|indoor (?:and|or|&) outdoor)\b/i;
 

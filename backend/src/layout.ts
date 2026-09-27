@@ -9,7 +9,7 @@ import type { Dims, Placement, RoomGeometry, Vec3 } from './types.js';
 // (coffee table in front of the sofa, rug under the group, nightstands beside the bed, lamp by the seat...),
 // validating every candidate against the floor outline, existing furniture boxes and already placed items.
 
-export interface LayoutItem { productId: string; category: string; dims: Dims; anchor?: string; near?: string }
+export interface LayoutItem { productId: string; category: string; dims: Dims; anchor?: string; near?: string; isSet?: boolean }
 
 /** An item that must stay where it is (a replacement standing in a real piece's spot); the rest arranges around it. */
 export interface FixedPlacement { productId: string; position: Vec3; yawDeg: number; reason?: string }
@@ -134,7 +134,8 @@ export function solveLayout(geo: RoomGeometry, items: LayoutItem[], opts: Layout
     // Lamps and small plants on tops: placed pieces first (in order of preference), then the user's own tables / storage.
     const onTops = (prefer: string[], base: number, realScore: number) => {
       for (const [i, cat] of prefer.entries()) {
-        for (const surf of placed.filter((p) => p.item.category === cat && !usedTops.has(p.item.productId))) {
+        // A table-and-chairs set's height is its chair backs, not the tabletop: nothing goes "on" it.
+        for (const surf of placed.filter((p) => p.item.category === cat && !usedTops.has(p.item.productId) && !p.item.isSet)) {
           const topH = surf.y + surf.item.dims.h;
           if (fitsTop(item.dims, surf.item.dims.w, surf.item.dims.d) && allowedOnTop(item.category, item.dims, cat, topH))
             push(surf.pos, surf.yaw, base - i * 0.3, `on the ${categoryDef(cat).label.toLowerCase()}`, topH, surf.item.productId);
@@ -253,7 +254,7 @@ export function solveLayout(geo: RoomGeometry, items: LayoutItem[], opts: Layout
         break;
       }
       case 'table_lamp':
-        onTops(['side_table', 'nightstand', 'desk', 'dresser', 'cabinet', 'tv_stand', 'coffee_table', 'dining_table'], 6, 4.5);
+        onTops(['side_table', 'nightstand', 'desk', 'dresser', 'cabinet', 'tv_stand', 'bookshelf', 'coffee_table', 'dining_table'], 6, 4.5);
         break;
       case 'ottoman': {
         const chair = findPlaced('armchair');
@@ -293,6 +294,13 @@ export function solveLayout(geo: RoomGeometry, items: LayoutItem[], opts: Layout
     cands.sort((a, b) => b.score - a.score);
     // Wall-mounted items and items standing on another item (table lamp) skip floor collision checks.
     let chosen = cands.find((c) => def.mount === 'wall' || (c.y ?? 0) > 0.05 || fits({ c: c.pos, hw: w / 2, hd: d / 2, yaw: c.yaw }, isRug));
+    if (!chosen && def.mount === 'floor') {
+      // Its preferred spots are taken (the room center under a bed): any open floor beats "in front of you".
+      const open: typeof cands = [];
+      gridSlots(poly, centroid, (pos, yaw, score, why) => open.push({ pos, yaw, score, why }));
+      open.sort((a, b) => b.score - a.score);
+      chosen = open.find((c) => fits({ c: c.pos, hw: w / 2, hd: d / 2, yaw: c.yaw }, isRug));
+    }
     let reason = chosen?.why ?? '';
     if (!chosen) {
       // Nothing valid: put it 1.5 m in front of the user and say so.

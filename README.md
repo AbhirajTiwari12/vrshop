@@ -86,6 +86,7 @@ the backend with `cloudflared tunnel --url http://localhost:8787` and use the ht
 | Manual filters (category, price, color, material, store, sort, 3D-only) | same | same |
 | Checkout ("buy the room") | AI agent checks out per store: Visa TAP-signed orders, mandate capped at the budget, Visa Acceptance sandbox authorizations (`VISA_ACCEPTANCE_*` keys) | same flow, authorizations labelled "simulated" |
 | Layout ("Design my room") | deterministic solver over your real room geometry | same |
+| Themed rooms ("a Cars-themed room for my son") | the AI marks which pieces carry the theme; products must show it, found in stores via Google Shopping (1 search per themed piece, cached) | IKEA only, keyword themes |
 
 Before a demo: `npm run reset` clears old sessions (keeps the cached 3D models), then create a fresh room from the phone.
 

@@ -112,6 +112,14 @@ export function addProducts(products: Product[], hintCategory: string | undefine
   return { added, kept };
 }
 
+/** Re-file a catalog product under another furniture type (a mini race-car lamp is a table lamp, not a floor lamp). */
+export function setInventoryCategory(id: string, category: string) {
+  const p = db().products[id];
+  if (!p || p.category === category) return;
+  p.category = category;
+  saveInventory();
+}
+
 /** Store measured dimensions (e.g. from the IKEA product page) so they're never fetched twice. */
 export function setListingDims(id: string, dims: Dims) {
   const p = db().products[id];
@@ -169,6 +177,9 @@ function materialMatch(p: Product, wanted: string[]) {
   return wanted.some((w) => (MATERIAL_FAMILY[w] ?? [w]).some((m) => have.includes(m)));
 }
 
+/** Does the listing show the theme (any one of its terms in the title / description)? */
+export const matchesTheme = (p: Product, theme: string[]) => { const t = textOf(p); return theme.some((k) => keywordMatch(t, k)); };
+
 export function keywordMatch(text: string, kw: string) {
   const k = norm(kw).trim();
   if (!k) return true;
@@ -187,7 +198,9 @@ function failures(p: Product, f: Filters): Dim[] {
   let other = false;
   if ((f.minPrice || f.maxPrice) && (p.price == null || (f.minPrice && p.price < f.minPrice) || (f.maxPrice && p.price > f.maxPrice))) other = true;
   else if (f.minRating && (p.rating == null || p.rating < f.minRating)) other = true;
-  else if ((f.only3d || config.demo3dOnly) && p.officialModel !== true) other = true;
+  // Demo mode is 3D-only, except themed requests: those products come from stores and won't have official models.
+  else if ((f.only3d || (config.demo3dOnly && !f.theme?.length)) && p.officialModel !== true) other = true;
+  else if (f.theme?.length && !matchesTheme(p, f.theme)) other = true;
   else if (p.dims && ((f.maxWidthM && p.dims.w > f.maxWidthM * 1.02) || (f.maxDepthM && p.dims.d > f.maxDepthM * 1.02) || (f.maxHeightM && p.dims.h > f.maxHeightM * 1.02))) other = true;
   else if (f.keywords?.length) { const t = textOf(p); if (!f.keywords.every((k) => keywordMatch(t, k))) other = true; }
   if (other) fail('other');

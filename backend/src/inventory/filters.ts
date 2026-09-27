@@ -1,6 +1,7 @@
 import { CATEGORIES, categoryDef, pluralLabel } from '../catalog.js';
 import { canonicalColor, canonicalMaterial, canonicalStyle } from './attributes.js';
 import type { Filters } from '../types.js';
+import { expandTheme } from './themes.js';
 
 const SORTS = ['relevance', 'price_asc', 'price_desc', 'rating'] as const;
 const KEYS = new Set(CATEGORIES.map((c) => c.key));
@@ -16,11 +17,13 @@ export function normalizeFilters(raw: any): Filters {
   const cat = String(raw.category ?? '').trim().toLowerCase();
   if (KEYS.has(cat)) f.category = cat;
   const keywords = list(raw.keywords).filter((k) => k.length > 1 && k.length < 40).slice(0, 4);
+  const theme = expandTheme(list(raw.theme).filter((k) => k.length > 1 && k.length < 40).slice(0, 6)) ?? [];
   const colors = list(raw.colors, canonicalColor);
   const materials = list(raw.materials, canonicalMaterial);
   const styles = list(raw.styles, canonicalStyle);
   const stores = list(raw.stores).slice(0, 6);
   if (keywords.length) f.keywords = keywords;
+  if (theme.length) f.theme = theme;
   if (colors.length) f.colors = colors;
   if (materials.length) f.materials = materials;
   if (styles.length) f.styles = styles;
@@ -46,6 +49,7 @@ const money = (v: number) => `$${Math.round(v).toLocaleString('en-US')}`;
 /** "black leather sofas under $800 from Wayfair" — used in replies and as the results heading. */
 export function describeFilters(f: Filters, count?: number): string {
   const words = [
+    ...(f.theme?.length ? [`${f.theme[0]}-themed`] : []),
     ...(f.colors ?? []).slice(0, 2).join(' or ').split(' ').filter(Boolean),
     ...(f.styles ?? []).slice(0, 1),
     ...(f.keywords ?? []),

@@ -82,7 +82,7 @@ Change the backend URL later without rebuilding: set it in the window and click 
 | Input | Action |
 |---|---|
 | Trigger / grip on UI | click |
-| Trigger / grip on furniture + move | select + slide along the floor (wall art slides along walls); your real furniture and walls are solid |
+| Trigger / grip on furniture + move | select + slide along the floor (wall art slides along walls). It can pass through your real furniture while moving (red outline); let go there and it glides to the nearest free spot. Walls stop it. |
 | Release near a wall | snaps flush to the wall |
 | Right (or left) thumbstick ← → | rotate the selected item |
 | Point at your real furniture (a Space Setup box) + trigger | its card: **Keep** / **Replace** / type / **Adjust** the box |

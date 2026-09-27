@@ -45,6 +45,8 @@ export interface Product {
   model: ModelInfo;
   // provider-specific bits
   ikeaItemNo?: string;
+  genImages?: string[];            // curated photos for image-to-3D (clean product shots, best first; up to 5)
+  genModel?: string;               // fal model for this product's generation (rodin | trellis2 | hunyuan)
   officialModel?: boolean;         // IKEA publishes a 3D model for it (undefined = not checked yet)
   serpImmersiveToken?: string;
 }
@@ -60,6 +62,7 @@ export interface ProductAttrs {
 export interface Filters {
   category?: string;               // category key from catalog.ts
   keywords?: string[];             // concrete features that must appear in the listing ("sleeper", "round")
+  theme?: string[];                // a motif the product itself must show; any one term matches ("race car", "lightning mcqueen")
   colors?: string[];
   materials?: string[];
   styles?: string[];               // soft: boosts ranking, never excludes
@@ -153,6 +156,7 @@ export interface Recommendation {
   priority: number;                // 1 = most important
   maxDims?: Dims;                  // max size that fits the free space (m)
   budget?: number;                 // suggested spend for this item
+  theme?: string[];                // this item should carry the room's theme ("race car", "cars"): products must show it
   placement: { anchor: 'wall' | 'corner' | 'center' | 'window' | 'near'; near?: string };
 }
 
@@ -179,6 +183,7 @@ export interface CategoryResult {
   placement: Recommendation['placement'];
   productIds: string[];
   origin: 'analysis' | 'voice' | 'search';
+  theme?: string[];                // set when these products carry a theme (found in stores if the catalog had none)
 }
 
 /** Room geometry reported by the Quest (from MRUK / Space Setup). Unity world space, meters, Y-up. */

@@ -80,6 +80,7 @@ namespace VRShop.Api
     {
         public string category;
         public List<string> keywords;
+        public List<string> theme;      // a motif the product must show ("race car"); any one term matches
         public List<string> colors;
         public List<string> materials;
         public List<string> styles;
@@ -95,7 +96,7 @@ namespace VRShop.Api
 
         public Filters Clone() => new Filters
         {
-            category = category, keywords = keywords == null ? null : new List<string>(keywords), colors = colors == null ? null : new List<string>(colors),
+            category = category, keywords = keywords == null ? null : new List<string>(keywords), theme = theme == null ? null : new List<string>(theme), colors = colors == null ? null : new List<string>(colors),
             materials = materials == null ? null : new List<string>(materials), styles = styles == null ? null : new List<string>(styles),
             stores = stores == null ? null : new List<string>(stores), minPrice = minPrice, maxPrice = maxPrice, minRating = minRating,
             maxWidthM = maxWidthM, maxDepthM = maxDepthM, maxHeightM = maxHeightM, only3d = only3d, sort = sort,
@@ -184,6 +185,7 @@ namespace VRShop.Api
         public PlacementHint placement;
         public List<string> productIds = new List<string>();
         public string origin; // analysis | voice | search
+        public List<string> theme; // set when these products carry the room's theme (e.g. race-car beds from stores)
     }
 
     public class CartItem { public string productId; public int qty; }

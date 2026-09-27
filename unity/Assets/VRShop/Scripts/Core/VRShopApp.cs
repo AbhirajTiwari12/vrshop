@@ -260,7 +260,8 @@ namespace VRShop.Core
             var ids = Session.cart != null && Session.cart.Count > 0
                 ? Session.cart.Select(c => c.productId).ToList()
                 : Session.categories.Where(c => c.origin == "analysis" && c.productIds.Count > 0 && !kept.Contains(c.category))
-                    .Select(c => c.productIds.FirstOrDefault(id => Session.GetProduct(id)?.model?.kind == "official") ?? c.productIds[0])
+                    // Themed rows lead with the themed product (usually a store listing without a 3D model); others prefer 3D.
+                    .Select(c => c.theme != null && c.theme.Count > 0 ? c.productIds[0] : c.productIds.FirstOrDefault(id => Session.GetProduct(id)?.model?.kind == "official") ?? c.productIds[0])
                     .Take(7).ToList();
             // Include what is already placed so the layout accounts for it.
             foreach (var it in FurnitureManager.Instance.Items)

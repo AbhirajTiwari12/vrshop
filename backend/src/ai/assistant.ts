@@ -1,6 +1,7 @@
 import { CATEGORIES, matchCategory } from '../catalog.js';
 import { COLORS, MATERIALS, STYLES, extractColors, extractMaterials, extractStyles } from '../inventory/attributes.js';
 import { normalizeFilters } from '../inventory/filters.js';
+import { themeFamily } from '../inventory/themes.js';
 import { log, errMsg } from '../util/log.js';
 import type { ChatTurn, Filters, Product, RoomAnalysis } from '../types.js';
 import { chatJson, hasOpenAI } from './openai.js';
@@ -48,6 +49,7 @@ const SCHEMA = obj({
   filters: obj({
     category: { type: 'string', enum: [...CATEGORIES.map((c) => c.key), 'any'] },
     keywords: { type: 'array', items: str },
+    theme: { type: 'array', items: str },
     colors: enumArr(COLORS),
     materials: enumArr(MATERIALS),
     styles: enumArr(STYLES),
@@ -77,6 +79,7 @@ Return the COMPLETE filter state after this message:
 - category: one of the enum keys, or "any".
 - colors / materials / styles: only enum values. Map synonyms (navy -> blue, cream -> beige, vegan leather -> faux leather, walnut/oak -> wood). "leather" already includes faux leather.
 - keywords: ONLY concrete features that appear in product titles: sleeper, sectional, round, extendable, storage, swivel, reclining, modular, corner, glass top, queen, king, 8x10. Never colors, materials, styles, the item type itself, or vibes like "cozy".
+- theme: a motif, character or franchise the product itself must show ("race car bed", "Cars themed rug", "dinosaur lamp", "Paw Patrol"): 2-5 words a matching product would have in its title, most specific first, e.g. ["lightning mcqueen", "disney cars", "race car", "racing"]. Unambiguous terms only ("outer space", "rocket", not "space"). [] when there's none; keep the current theme unless they drop it or change the kind of item. Styles like "modern" are not themes.
 - Prices in USD; 0 = no limit. "under 800" -> maxPrice 800. "cheaper" -> maxPrice about 15% below the referenced item's price, or below the current median. "more premium" -> minPrice around the current median.
 - Sizes in meters (1 in = 0.0254 m, 1 ft = 0.3048 m); 0 = no limit. "fits a 7 foot wall" -> maxWidthM 2.13.
 - minRating 0..5, 0 = none. only3d = user wants items with real 3D models.
@@ -176,6 +179,9 @@ export function heuristicInterpret(text: string, ctx: AssistantContext): Interpr
     if (ref) f.maxPrice = niceDown(ref * 0.85);
   }
   if (/\b3d\b/.test(t)) f.only3d = true;
+  const theme = themeOf(t);
+  if (theme) f.theme = theme;
+  else if (/\b(no|any|without a) theme\b|\bplain\b/.test(t)) delete f.theme;
   if (/\b(sleeper|sectional|round|extendable|storage|swivel|reclining|recliner|modular|corner)\b/.test(t)) {
     f.keywords = [...new Set([...(f.keywords ?? []), ...(t.match(/\b(sleeper|sectional|round|extendable|storage|swivel|reclining|modular|corner)\b/g) ?? [])])];
   }
@@ -208,6 +214,9 @@ export function heuristicInterpret(text: string, ctx: AssistantContext): Interpr
   const replaceTarget = replaceMatch ? (replaceMatch[1] || 'this').trim() : undefined;
   return { filters, question, action, target, atPointer: /\b(here|there|this corner|that corner)\b/.test(t), replaceTarget, reply, source: 'heuristic' };
 }
+
+/** Common kids' themes without an AI key: the words matching products carry in their titles. */
+export const themeOf = (t: string) => themeFamily(t);
 
 // ------------------------------------------------------------------------------------------ answers from data
 
