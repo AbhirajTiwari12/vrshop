@@ -23,7 +23,7 @@ namespace VRShop.UI
 
         const float W = 1280, H = 820, Scale = 0.00075f; // 0.96 m x 0.62 m
         const int PerPage = 6, TabsPerPage = 4;
-        const string BrowseKey = "__browse", CartKey = "__cart";
+        const string BrowseKey = "__browse", CartKey = "__cart", VisaKey = "__visa";
         static readonly (float min, float max, string label)[] k_PricePresets =
             { (0, 0, "Any price"), (0, 200, "Under $200"), (0, 500, "Under $500"), (0, 1000, "Under $1,000"), (0, 2000, "Under $2,000"), (1000, 0, "$1,000+") };
         static readonly (string key, string label)[] k_Sorts = { ("relevance", "Best match"), ("price_asc", "Price: low"), ("price_desc", "Price: high"), ("rating", "Top rated") };
@@ -34,7 +34,12 @@ namespace VRShop.UI
         readonly List<Image> m_Swatches = new List<Image>();
         readonly List<UIButton> m_Tabs = new List<UIButton>();
         UIButton m_TabPrev, m_TabNext, m_CartTab, m_BrowseTab, m_Prev, m_Next, m_Design, m_More;
-        RectTransform m_FilterBar;
+        RectTransform m_FilterBar, m_VisaView;
+        TextMeshProUGUI m_VSteps, m_VTitle, m_VInfo;
+        UIButton m_VApprove, m_VSecondary, m_CartBuy;
+        Quote m_Quote;
+        string m_QuoteKey;
+        bool m_VisaBusy;
         UIButton m_FCategory, m_FPrice, m_FColor, m_FMaterial, m_FSort, m_F3d, m_FClear;
         TextMeshProUGUI m_FilterText;
         bool m_FilterBusy;
@@ -223,7 +228,22 @@ namespace VRShop.UI
             m_CartTotal = UIKit.Text(m_CartView, "Total", 844, 22, 344, 110, "", 30, UIKit.TextColor, TextAlignmentOptions.TopLeft, FontStyles.Bold);
             m_BudgetBar = UIKit.Panel(m_CartView, "BudgetBar", 844, 142, 340, 18, new Color(1, 1, 1, 0.12f));
             m_BudgetFill = UIKit.Panel(m_BudgetBar.transform, "Fill", 0, 0, 0, 18, UIKit.Good);
-            m_CartNote = UIKit.Text(m_CartView, "Note", 844, 176, 344, 250, "", 18, UIKit.Muted);
+            m_CartNote = UIKit.Text(m_CartView, "Note", 844, 176, 344, 176, "", 18, UIKit.Muted);
+            m_CartBuy = UIKit.Button(m_CartView, "BuyWithVisa", 844, 362, 340, 66, "Buy the room with Visa", 22, ShowVisa, true);
+
+            // Content: Visa agent checkout (quote -> approve -> live receipt)
+            m_VisaView = UIKit.Box(root, "VisaView", 36, 254, 1208, 458);
+            UIKit.Panel(m_VisaView, "StepsBg", 0, 0, 760, 458, UIKit.Card);
+            m_VSteps = UIKit.Text(m_VisaView, "Steps", 22, 16, 716, 426, "", 19, UIKit.TextColor);
+            m_VSteps.overflowMode = TextOverflowModes.Truncate;
+            UIKit.Panel(m_VisaView, "SideBg", 780, 0, 428, 458, UIKit.Card);
+            var logo = UIKit.Panel(m_VisaView, "VisaLogo", 804, 22, 104, 52, new Color(0.1f, 0.12f, 0.44f, 1f));
+            UIKit.Text(logo.transform, "Text", 0, 0, 104, 52, "VISA", 28, Color.white, TextAlignmentOptions.Center, FontStyles.Bold | FontStyles.Italic);
+            m_VTitle = UIKit.Text(m_VisaView, "Title", 924, 24, 268, 52, "Buy the room", 28, UIKit.TextColor, TextAlignmentOptions.Left, FontStyles.Bold);
+            m_VInfo = UIKit.Text(m_VisaView, "Info", 804, 90, 384, 218, "", 19, UIKit.Muted);
+            m_VApprove = UIKit.Button(m_VisaView, "Approve", 804, 314, 384, 66, "Approve with Visa", 22, () => ApproveVisa(m_Quote != null && m_Quote.overBy > 0), true);
+            m_VSecondary = UIKit.Button(m_VisaView, "Secondary", 804, 390, 250, 52, "", 18, ApplyTopSwap);
+            UIKit.Button(m_VisaView, "Back", 1062, 390, 126, 52, "Back", 18, () => { m_Category = CartKey; Refresh(); });
 
             // Content: message (loading / errors)
             m_Message = UIKit.Box(root, "Message", 36, 254, 1208, 458);
@@ -250,6 +270,7 @@ namespace VRShop.UI
             m_Detail.gameObject.SetActive(which == m_Detail);
             m_CartView.gameObject.SetActive(which == m_CartView);
             m_Message.gameObject.SetActive(which == m_Message);
+            m_VisaView.gameObject.SetActive(which == m_VisaView);
             var paged = which == m_Grid || which == m_CartView;
             m_Prev.gameObject.SetActive(paged);
             m_Next.gameObject.SetActive(paged);
@@ -287,14 +308,14 @@ namespace VRShop.UI
             m_CartSummary.text = s.budget.HasValue ? $"Cart {cartCount}  •  {UIKit.Money(s.cartTotal)} / {UIKit.Money(s.budget)}" : $"Cart {cartCount}  •  {UIKit.Money(s.cartTotal)}";
             m_Stage.text = s.status == "ready" || m_Category == BrowseKey ? "" : s.status == "error" ? $"Error: {s.error}" : s.stage;
 
-            if ((s.categories == null || s.categories.Count == 0) && m_Category != BrowseKey)
+            if ((s.categories == null || s.categories.Count == 0) && m_Category != BrowseKey && m_Category != VisaKey && m_Category != CartKey)
             {
                 ShowMessage(s.status == "error" ? $"Something went wrong:\n{s.error}" : $"{s.stage}\n\n<size=24><color=#A9B0BC>Finding real furniture that fits your room…</color></size>");
                 RefreshTabs();
                 RefreshFooter();
                 return;
             }
-            if (m_Category == null || (m_Category != CartKey && m_Category != BrowseKey && s.categories.All(c => c.category != m_Category)))
+            if (m_Category == null || (m_Category != CartKey && m_Category != BrowseKey && m_Category != VisaKey && s.categories.All(c => c.category != m_Category)))
             {
                 m_Category = s.categories[0].category;
                 m_Page = 0;
@@ -322,7 +343,7 @@ namespace VRShop.UI
             }
             m_TabPrev.gameObject.SetActive(m_TabPage > 0);
             m_TabNext.gameObject.SetActive(m_TabPage < pages - 1);
-            var cartSel = m_Category == CartKey;
+            var cartSel = m_Category == CartKey || m_Category == VisaKey;
             m_CartTab.SetLabel($"Cart ({S?.cart?.Sum(c => c.qty) ?? 0})");
             m_CartTab.SetColors(cartSel ? UIKit.Accent : UIKit.ButtonBg, cartSel ? UIKit.AccentHover : UIKit.ButtonBgHover);
             var browseSel = m_Category == BrowseKey;
@@ -363,6 +384,7 @@ namespace VRShop.UI
             if (m_DetailProduct != null) { ShowDetail(m_DetailProduct); return; }
             if (m_Category == CartKey) { ShowCart(); return; }
             if (m_Category == BrowseKey) { ShowBrowseGrid(s); return; }
+            if (m_Category == VisaKey) { ShowVisaView(s); return; }
             var cat = s.categories.FirstOrDefault(c => c.category == m_Category);
             if (cat == null) return;
             FillGrid(s, cat.productIds);
@@ -505,6 +527,8 @@ namespace VRShop.UI
             fillRt.sizeDelta = new Vector2(340 * frac, 18);
             m_BudgetFill.color = total > budget && budget > 0 ? UIKit.Bad : UIKit.Good;
             var stores = items.Select(c => s.GetProduct(c.productId)?.store).Where(x => x != null).Distinct().ToList();
+            m_CartBuy.gameObject.SetActive(items.Count > 0 || s.checkout != null);
+            m_CartBuy.SetLabel(items.Count > 0 ? "Buy the room with Visa" : "View Visa receipt");
             m_CartNote.text = items.Count == 0
                 ? "Your cart is empty. Open a product and choose Add to cart."
                 : $"{stores.Count} store{(stores.Count == 1 ? "" : "s")}: {string.Join(", ", stores)}\n\nCheckout links are waiting in the phone app:\n<color=#8FB8FF>{Api.BaseUrl}/#/s/{s.id}/cart</color>";
@@ -694,6 +718,129 @@ namespace VRShop.UI
                 m_FilterBusy = false;
                 if (m_Category == BrowseKey) RefreshFilterBar();
             }
+        }
+
+        // ------------------------------------------------------------------ Visa agent checkout
+        /// <summary>Open the Visa checkout view (Cart button, or voice: "buy the room").</summary>
+        public void ShowVisa()
+        {
+            m_Category = VisaKey;
+            m_DetailProduct = null;
+            Show();
+            Refresh();
+        }
+
+        static string CartSignature(Session s) => s.cart == null ? "" : string.Join(",", s.cart.Select(c => $"{c.productId}:{c.qty}"));
+
+        /// <summary>The TMP font atlas only has basic Latin; swap the few typographic characters the server uses.</summary>
+        static string Clean(string t) => string.IsNullOrEmpty(t) ? "" : t.Replace("≤", "within").Replace("’", "'").Replace("“", "\"").Replace("”", "\"").Replace("→", "->").Replace("<", "(").Replace(">", ")");
+
+        async void LoadQuote(Session s)
+        {
+            var key = CartSignature(s);
+            if (key == m_QuoteKey) return;
+            m_QuoteKey = key;
+            try { m_Quote = await Api.Quote(s.id); }
+            catch (System.Exception e) { m_Quote = null; Debug.LogWarning($"[VRShop] quote: {e.Message}"); }
+            if (m_Category == VisaKey) RefreshContent();
+        }
+
+        void ShowVisaView(Session s)
+        {
+            SetContent(m_VisaView);
+            var c = s.checkout;
+            var hasCart = s.cart != null && s.cart.Count > 0;
+            if (c != null && (c.status == "running" || !hasCart)) { ShowReceipt(c); return; }
+            if (!hasCart) { m_VSteps.text = "Your cart is empty.\n\nAdd pieces from the catalog (or say \"add it to my cart\"), then come back to buy the room in one approval."; m_VInfo.text = ""; m_VApprove.gameObject.SetActive(false); m_VSecondary.gameObject.SetActive(false); return; }
+            LoadQuote(s);
+            var q = m_Quote;
+            m_VTitle.text = "Buy the room";
+            if (q == null || m_QuoteKey != CartSignature(s))
+            {
+                m_VSteps.text = "Preparing your basket...";
+                m_VApprove.gameObject.SetActive(false);
+                m_VSecondary.gameObject.SetActive(false);
+                return;
+            }
+            var sb = new System.Text.StringBuilder();
+            foreach (var g in q.groups)
+            {
+                sb.Append($"<b>{Clean(g.store)}</b>   {UIKit.Money(g.subtotal)}\n");
+                foreach (var it in g.items) sb.Append($"<color=#A9B0BC>   {Clean(Short(it.title))}{(it.qty > 1 ? $" x{it.qty}" : "")}   {UIKit.Money(it.unitPrice * it.qty)}</color>\n");
+            }
+            if (q.overBy > 0)
+            {
+                sb.Append($"\n<color=#FFB84D><b>{UIKit.Money(q.overBy)} over your budget.</b> Cheaper look-alikes:</color>\n");
+                foreach (var w in q.swaps) sb.Append($"   {Clean(Short(w.from.title))} -> {Clean(Short(w.to.title))}  <color=#66E094>save {UIKit.Money(w.saves)}</color>\n   <color=#A9B0BC><size=16>{Clean(w.why)}</size></color>\n");
+            }
+            m_VSteps.text = sb.ToString();
+            var over = q.overBy > 0;
+            var cap = q.budget.HasValue && !over ? q.budget.Value : q.total;
+            m_VInfo.text = $"Pay with <color=#F3F3F6>{q.visa?.card?.label}</color>\nTotal <color=#F3F3F6>{UIKit.Money(q.total)}</color>{(q.budget.HasValue ? $"  of {UIKit.Money(q.budget)} budget" : "")}\nAgent spending cap <color=#F3F3F6>{UIKit.Money(cap)}</color>\n\n<size=16>Approve once: your agent checks out at {q.groups.Count} store{(q.groups.Count == 1 ? "" : "s")}, signing each order with Visa Trusted Agent Protocol. {(q.visa?.acceptance == "sandbox" ? "Real Visa Acceptance sandbox authorizations." : "Visa authorization simulated (no sandbox keys).")}</size>";
+            m_VApprove.gameObject.SetActive(true);
+            m_VApprove.Interactable = !m_VisaBusy;
+            m_VApprove.SetLabel(m_VisaBusy ? "Approving..." : over ? $"Approve {UIKit.Money(q.total)} anyway" : $"Approve {UIKit.Money(q.total)} with Visa");
+            var swap = over && q.swaps.Count > 0 ? q.swaps[0] : null;
+            m_VSecondary.gameObject.SetActive(swap != null);
+            if (swap != null) m_VSecondary.SetLabel($"Swap: save {UIKit.Money(swap.saves)}");
+        }
+
+        void ShowReceipt(Checkout c)
+        {
+            m_VTitle.text = c.status == "running" ? "Checking out" : c.status == "done" ? "Room bought" : "Checkout";
+            var sb = new System.Text.StringBuilder();
+            foreach (var o in c.orders)
+            {
+                var col = o.status == "authorized" ? "#66E094" : o.status == "pending" ? "#A9B0BC" : o.status == "voided" ? "#FFB84D" : "#FF6B61";
+                sb.Append($"<b>{Clean(o.store)}</b>   {UIKit.Money(o.amount)}   <color={col}>{o.status.ToUpper()}</color>\n");
+                // Finished orders collapse to their payment line so several stores fit.
+                var steps = o.status == "pending" || c.orders.Count == 1 ? o.steps : o.steps.Where(x => !x.ok || x.label.StartsWith("Visa")).ToList();
+                foreach (var st in steps)
+                    sb.Append($"<color={(st.ok ? "#66E094" : "#FF6B61")}>  •</color> {Clean(st.label)}{(string.IsNullOrEmpty(st.detail) ? "" : $"\n<color=#A9B0BC><size=15>      {Clean(st.detail)}</size></color>")}\n");
+                if (o.status == "pending" && c.status == "running") sb.Append("<color=#A9B0BC>  • working...</color>\n");
+                sb.Append("\n");
+            }
+            m_VSteps.text = sb.ToString();
+            var m = c.mandate;
+            m_VInfo.text = $"{Clean(c.summary ?? "Your AI agent is checking out at each store.")}\n\nSpent <color=#F3F3F6>{UIKit.Money(m?.spent)}</color> of <color=#F3F3F6>{UIKit.Money(m?.totalCap)}</color>\n{m?.card?.label}\n<size=15>Mandate {m?.id}</size>";
+            m_VApprove.gameObject.SetActive(false);
+            m_VSecondary.gameObject.SetActive(false);
+        }
+
+        static string Short(string t) => string.IsNullOrEmpty(t) ? "" : (t.Length > 34 ? t.Substring(0, 33) + "..." : t);
+
+        async void ApproveVisa(bool allowOverBudget)
+        {
+            if (S == null || m_VisaBusy) return;
+            m_VisaBusy = true;
+            RefreshContent();
+            // The approval moment: one deliberate press, confirmed with a haptic pulse on both controllers.
+            XRInput.Instance?.Haptic(Hand.Left, 0.6f, 0.12f);
+            XRInput.Instance?.Haptic(Hand.Right, 0.6f, 0.12f);
+            try
+            {
+                var s = await Api.StartCheckout(S.id, allowOverBudget);
+                Toast.Show("Approved. Your agent is checking out with Visa...", 4);
+                VRShopApp.Instance.SetSession(s);
+            }
+            catch (System.Exception e) { Toast.Show($"Checkout: {e.Message}", 5); }
+            finally { m_VisaBusy = false; if (m_Category == VisaKey) RefreshContent(); }
+        }
+
+        async void ApplyTopSwap()
+        {
+            var w = m_Quote != null && m_Quote.swaps.Count > 0 ? m_Quote.swaps[0] : null;
+            if (S == null || w == null || m_VisaBusy) return;
+            m_VisaBusy = true;
+            try
+            {
+                var s = await Api.Swap(S.id, w.from.productId, w.to.productId);
+                Toast.Show($"Swapped for {Short(w.to.title)} (save {UIKit.Money(w.saves)})", 4);
+                m_QuoteKey = null;
+                VRShopApp.Instance.SetSession(s);
+            }
+            catch (System.Exception e) { Toast.Show($"Swap failed: {e.Message}"); }
+            finally { m_VisaBusy = false; }
         }
 
         async void SearchStores()

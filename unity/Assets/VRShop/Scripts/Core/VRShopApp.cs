@@ -158,7 +158,7 @@ namespace VRShop.Core
         {
             while (this != null && Session != null)
             {
-                await Task.Delay(Session.status == "ready" ? 4000 : 1500);
+                await Task.Delay(Session.checkout?.status == "running" ? 700 : Session.status == "ready" ? 4000 : 1500);
                 if (this == null) return;
                 try
                 {
@@ -188,6 +188,9 @@ namespace VRShop.Core
         {
             if (s == null || s.unchanged) return;
             var first = Session == null || Session.id != s.id;
+            // Announce when the agent finishes checking out ("Room bought: 3 stores, $1,412 of $1,500 via Visa").
+            if (!first && Session.checkout?.status == "running" && s.checkout != null && s.checkout.status != "running" && !string.IsNullOrEmpty(s.checkout.summary))
+                Toast.Show(s.checkout.summary, 8);
             // Keep product model status we learned locally if the server copy is older.
             Session = s;
             var sig = s.room != null ? $"{s.id}:{s.room.summary}:{s.room.lighting?.kelvin}" : s.id;

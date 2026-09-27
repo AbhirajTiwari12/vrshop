@@ -56,6 +56,30 @@ export const config = {
     monthlyLiveLimit: Number(env('SHOPPING_MONTHLY_LIMIT', '200')),
   },
   ikea: { country: env('IKEA_COUNTRY', 'us'), lang: env('IKEA_LANG', 'en') },
+  // Visa Acceptance (Cybersource) sandbox for real authorizations during agent checkout. Without keys: simulated.
+  visa: {
+    host: env('VISA_ACCEPTANCE_HOST', 'apitest.cybersource.com'),
+    merchantId: env('VISA_ACCEPTANCE_MERCHANT_ID'),
+    keyId: env('VISA_ACCEPTANCE_KEY_ID'),
+    secret: env('VISA_ACCEPTANCE_SECRET_KEY'),
+    // Card on file for the demo shopper: Visa's published sandbox test card (never a real card).
+    card: {
+      number: env('VISA_TEST_CARD_NUMBER', '4111111111111111'),
+      expMonth: env('VISA_TEST_CARD_EXP_MONTH', '12'),
+      expYear: env('VISA_TEST_CARD_EXP_YEAR', '2031'),
+      cvv: env('VISA_TEST_CARD_CVV', '123'),
+    },
+    billTo: {
+      firstName: env('VISA_BILLTO_FIRST', 'Alex'),
+      lastName: env('VISA_BILLTO_LAST', 'Shopper'),
+      address1: env('VISA_BILLTO_ADDRESS', '1 Market St'),
+      locality: env('VISA_BILLTO_CITY', 'San Francisco'),
+      administrativeArea: env('VISA_BILLTO_STATE', 'CA'),
+      postalCode: env('VISA_BILLTO_ZIP', '94105'),
+      country: env('VISA_BILLTO_COUNTRY', 'US'),
+      email: env('VISA_BILLTO_EMAIL', 'test@cybs.com'),
+    },
+  },
   gen: {
     provider: pickGenProvider(),
     falKey: env('FAL_KEY'),

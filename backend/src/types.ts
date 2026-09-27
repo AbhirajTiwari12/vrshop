@@ -85,6 +85,60 @@ export interface BrowseResult {
   updatedAt: number;
 }
 
+// ------------------------------------------------------------------ agentic checkout (Visa)
+
+/**
+ * The shopper's one-time approval for the agent to buy the room: a spending mandate modelled on Visa Intelligent
+ * Commerce's payment instruction (total cap = room budget, per-merchant caps, item list, expiry).
+ */
+export interface Mandate {
+  id: string;
+  sessionId: string;
+  createdAt: number;
+  expiresAt: number;
+  status: 'active' | 'completed' | 'expired' | 'revoked';
+  currency: string;
+  totalCap: number;                     // declineThreshold: the agent can never spend more than this
+  spent: number;
+  merchants: { store: string; cap: number; items: { productId: string; title: string; qty: number; unitPrice: number }[] }[];
+  approval: { via: 'headset' | 'phone' | 'voice'; at: number; text: string };
+  card: { brand: 'Visa'; last4: string; label: string };
+}
+
+export interface OrderStep { at: number; label: string; ok: boolean; detail?: string }
+
+export interface Order {
+  id: string;
+  mandateId: string;
+  store: string;
+  items: { productId: string; title: string; qty: number; unitPrice: number }[];
+  amount: number;
+  currency: string;
+  status: 'pending' | 'authorized' | 'declined' | 'rejected' | 'error' | 'voided';
+  steps: OrderStep[];
+  tap?: { keyId: string; nonce: string; tag: string; verified: boolean; reason?: string };
+  payment?: {
+    provider: 'visa_acceptance' | 'simulated';
+    id?: string;                        // Visa Acceptance transaction id
+    status?: string;                    // AUTHORIZED | DECLINED | ...
+    approvalCode?: string;
+    reconciliationId?: string;
+    reversalId?: string;
+    message?: string;
+  };
+  merchantOrderId?: string;
+  createdAt: number;
+}
+
+export interface SplitLink { id: string; createdAt: number; to: string; amount: number; url: string; provider: 'visa_acceptance' | 'simulated'; note?: string }
+
+export interface Checkout {
+  status: 'running' | 'done' | 'partial' | 'failed';
+  mandate: Mandate;
+  orders: Order[];
+  summary?: string;
+}
+
 export interface ChatTurn { role: 'user' | 'assistant'; text: string; at: number; via?: 'voice' | 'text' }
 
 export interface PaletteColor { hex: string; name: string }
@@ -162,4 +216,7 @@ export interface Session {
   voice: { at: number; transcript: string; query: string }[];
   browse?: BrowseResult;          // current catalog filter + results (voice or manual)
   chat?: ChatTurn[];              // conversation with the shopping assistant (last ~20 turns)
+  checkout?: Checkout;            // latest agentic checkout ("buy the room")
+  splits?: SplitLink[];           // Visa Pay by Link requests sent to roommates
+  pastCheckouts?: Checkout[];
 }

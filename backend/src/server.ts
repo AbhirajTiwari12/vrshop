@@ -4,13 +4,19 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import multer from 'multer';
 import sharp from 'sharp';
 import { baseUrl, capabilities, config, PUBLIC_DIR } from './config.js';
-import { dirs, getProduct, getSession, hash, listSessions, saveSession, updateProduct } from './store.js';
+import { dirs, getProduct, getSession, hash, listSessions, saveSession, updateProduct, upsertProduct } from './store.js';
 import { createSession, expandSession, sessionAsk, sessionSearch, setBrowse, setCartQty } from './session.js';
-import { inventoryStats } from './inventory/inventory.js';
+import { inventoryProduct, inventoryStats } from './inventory/inventory.js';
 import { pullCatalog, pullStatus, planShoppingQueries, type PullTier } from './inventory/pull.js';
 import { liveSearchBudgetLeft, shoppingCallsThisMonth } from './inventory/usage.js';
 import { COLORS, MATERIALS, STYLES } from './inventory/attributes.js';
 import { CATEGORIES } from './catalog.js';
+import { retailerRouter } from './pay/retailer.js';
+import { splitWithRoommate, startCheckout, tamperDemo, TAMPER_MODES, voidOrder, type TamperMode } from './pay/agent.js';
+import { findMandate, vicInstruction } from './pay/mandate.js';
+import { buildQuote } from './pay/quote.js';
+import { keyDirectory } from './pay/tap.js';
+import { visaStatus } from './pay/visa.js';
 import { ensureModel, modelFile } from './models/pipeline.js';
 import { solveLayout, defaultGeometry, type LayoutItem } from './layout.js';
 import { categoryDef } from './catalog.js';
@@ -179,6 +185,67 @@ app.post('/api/sessions/:id/cart', (req, res) => {
   const s = setCartQty(String(req.params.id), String(req.body?.productId ?? ''), Number(req.body?.qty ?? 1));
   res.json(expandSession(s));
 });
+
+// ---------------------------------------------------------------------------- Visa: agentic checkout ("buy the room")
+app.get('/api/visa/status', (_req, res) => res.json(visaStatus()));
+
+app.get('/api/sessions/:id/checkout/quote', (req, res) => {
+  res.json(buildQuote(need(getSession(String(req.params.id)), 'Session')));
+});
+
+// The shopper's single approval (headset trigger / phone button) creates the mandate and starts the agent.
+app.post('/api/sessions/:id/checkout', (req, res) => {
+  const via = ['headset', 'phone', 'voice'].includes(req.body?.via) ? req.body.via : 'phone';
+  startCheckout(String(req.params.id), { via, allowOverBudget: req.body?.allowOverBudget === true });
+  res.json(expandSession(getSession(String(req.params.id))!));
+});
+
+app.post('/api/sessions/:id/checkout/orders/:orderId/void', async (req, res) => {
+  await voidOrder(String(req.params.id), String(req.params.orderId));
+  res.json(expandSession(getSession(String(req.params.id))!));
+});
+
+// The approval as a Visa Intelligent Commerce payment instruction.
+app.get('/api/sessions/:id/checkout/instruction', (req, res) => {
+  const m = need(getSession(String(req.params.id)), 'Session').checkout?.mandate;
+  res.json(vicInstruction(need(m ? findMandate(m.id) ?? m : undefined, 'Mandate')));
+});
+
+// Split the room: Visa Pay by Link for a roommate's share.
+app.post('/api/sessions/:id/split', async (req, res) => {
+  await splitWithRoommate(String(req.params.id), String(req.body?.to ?? '').slice(0, 40), Number(req.body?.share ?? 0.5));
+  res.json(expandSession(getSession(String(req.params.id))!));
+});
+
+// Landing page for simulated payment links (real ones are hosted by Visa Acceptance).
+app.get('/pay/sim/:id', (req, res) => {
+  const amount = Number(req.query.amount) || 0;
+  res.type('html').send(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pay your share</title><body style="font:16px system-ui;max-width:420px;margin:40px auto;padding:0 16px;color-scheme:light dark"><h1 style="font-size:22px">Pay your share of the room</h1><p style="font-size:34px;font-weight:700;margin:8px 0">$${amount.toFixed(2)}</p><p>This is a <b>simulated</b> Visa Pay by Link page. With Visa Acceptance sandbox keys (Pay by Link enabled), this is a real hosted Visa checkout.</p><p style="opacity:.6;font-size:13px">Link ${String(req.params.id).replace(/[^\w-]/g, '')}</p></body>`);
+});
+
+// Budget coach: swap a cart item for a cheaper look-alike.
+app.post('/api/sessions/:id/cart/swap', (req, res) => {
+  const id = String(req.params.id);
+  const s = need(getSession(id), 'Session');
+  const from = String(req.body?.from ?? ''), to = String(req.body?.to ?? '');
+  const qty = s.cart.find((c) => c.productId === from)?.qty ?? 1;
+  need(getProduct(to) ?? inventoryProduct(to), 'Product');
+  if (!getProduct(to)) upsertProduct({ ...inventoryProduct(to)! });
+  setCartQty(id, from, 0);
+  setCartQty(id, to, qty);
+  res.json(expandSession(getSession(id)!));
+});
+
+// Trusted Agent Protocol: the agent's public key directory (merchants resolve keyids here) and the tamper demo.
+app.get(['/.well-known/jwks', '/.well-known/jwks.json'], (_req, res) => res.json(keyDirectory()));
+app.post('/api/visa/tamper', async (req, res) => {
+  const mode = String(req.body?.mode ?? 'valid') as TamperMode;
+  if (!TAMPER_MODES.includes(mode)) return void res.status(400).json({ error: `mode must be one of ${TAMPER_MODES.join(', ')}` });
+  res.json(await tamperDemo(mode));
+});
+
+// Simulated retailers that accept trusted agents (TAP verify -> mandate check -> Visa authorization).
+app.use('/retailer', retailerRouter);
 
 // ---------------------------------------------------------------------------- catalog (bulk-pulled listings)
 app.get('/api/catalog', (_req, res) => {

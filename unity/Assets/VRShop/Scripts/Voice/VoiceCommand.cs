@@ -101,6 +101,9 @@ namespace VRShop.Voice
                     case "open" when target != null:
                         CatalogPanel.Instance?.OpenProduct(target.id);
                         break;
+                    case "checkout":
+                        CatalogPanel.Instance?.ShowVisa(); // the user still approves with one press
+                        break;
                     case "add_to_cart":
                     case "remove_from_cart":
                         break; // done on the server; the reply says so and the cart count updates

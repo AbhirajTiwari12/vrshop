@@ -913,3 +913,72 @@ body.has-tabbar .toasts { bottom: calc(84px + env(safe-area-inset-bottom)); }
     -webkit-mask-image: linear-gradient(90deg, #000 94%, transparent); mask-image: linear-gradient(90deg, #000 94%, transparent); }
   .hscroll { margin: 0; padding-inline: 0; }
 }
+
+/* ------------------------------------------------------------------ cart: Visa agent checkout */
+.visa-card { display: flex; flex-direction: column; gap: 14px; }
+.visa-head { display: flex; align-items: flex-start; gap: 12px; }
+.visa-head > div:nth-child(2) { flex: 1; min-width: 0; }
+.visa-head h2 { font-size: 19px; font-weight: 700; }
+.visa-head p { font-size: 14px; margin-top: 2px; }
+.visa-head .pill { flex: none; }
+.visa-logo {
+  flex: none; width: 52px; height: 34px; border-radius: 8px; display: grid; place-items: center;
+  background: #1a1f71; color: #fff; font: italic 800 15px/1 var(--font); letter-spacing: 0.02em;
+  box-shadow: inset 0 -3px 0 #f7b600;
+}
+.mandate { border-radius: var(--radius); background: var(--surface-2); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.m-row { display: flex; justify-content: space-between; gap: 12px; font-size: 14.5px; }
+.m-row > span { color: var(--text-2); min-width: 0; }
+.m-row b { font-variant-numeric: tabular-nums; text-align: right; }
+.m-row.total { border-top: 1px solid var(--border); padding-top: 8px; font-size: 16px; }
+.m-row.total > span { color: var(--text); font-weight: 600; }
+.m-note { font-size: 12.5px; line-height: 1.4; }
+.mono { font-family: var(--mono); font-size: 12.5px; }
+.mandate .mono { word-break: break-all; }
+.visa-pay { background: #1a1f71; border-color: #1a1f71; }
+.visa-pay:hover { background: #242b8f; }
+.coach { border-radius: var(--radius); border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent); background: var(--warn-soft); padding: 12px; }
+.coach h3 { font-size: 14.5px; display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
+.coach h3 .i { width: 16px; height: 16px; color: var(--warn); }
+.coach ul { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.swap { display: grid; grid-template-columns: 44px 14px 44px minmax(0, 1fr); gap: 6px 8px; align-items: center; }
+.swap img, .swap .ph { width: 44px; height: 44px; border-radius: 10px; background: #fff; object-fit: contain; padding: 3px; }
+.swap .arrow { color: var(--text-3); text-align: center; }
+.swap-main { display: flex; flex-direction: column; min-width: 0; font-size: 13.5px; }
+.swap-main b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.swap-main .muted { font-size: 12.5px; }
+.swap .btn { grid-column: 1 / -1; }
+.orders { list-style: none; display: flex; flex-direction: column; gap: 12px; }
+.order { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; }
+.order-head { display: flex; align-items: center; gap: 10px; }
+.order-head > div:nth-child(2) { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.order-head .muted { font-size: 13px; }
+.order .store-logo { width: 34px; height: 34px; font-size: 15px; }
+.order > .btn { margin-top: 8px; }
+.steps { list-style: none; display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.steps li { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 8px; font-size: 13.5px; animation: fade-up 0.25s ease both; }
+.steps li .i { width: 18px; height: 18px; margin-top: 1px; }
+.steps li.ok .i { color: var(--success); }
+.steps li.bad .i { color: var(--danger); }
+.steps li > div { display: flex; flex-direction: column; min-width: 0; }
+.steps small { color: var(--text-3); font-size: 12px; overflow-wrap: anywhere; }
+.steps .wait { color: var(--text-3); }
+.vic summary, .security summary { cursor: pointer; list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-weight: 600; font-size: 14.5px; }
+.vic summary::-webkit-details-marker, .security summary::-webkit-details-marker { display: none; }
+.vic[open] .chev, .security[open] .chev { transform: rotate(180deg); }
+.vic summary { color: var(--accent-text); font-size: 13.5px; }
+.vic pre { margin-top: 10px; max-height: 320px; overflow: auto; padding: 12px; border-radius: 12px; background: var(--surface-2); white-space: pre; }
+.security p { margin-top: 10px; font-size: 14px; line-height: 1.5; }
+.security summary > span { display: flex; align-items: center; gap: 8px; }
+.security summary .i:first-child { color: var(--success); }
+.security .chips { margin-top: 6px; }
+.split-card h2 { font-size: 18px; }
+.split-card p { font-size: 14px; margin-top: 2px; }
+.split-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-top: 12px; }
+.split-form input, .split-form select { min-height: 42px; border-radius: 12px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text); font: 16px var(--font); padding: 0 10px; width: 100%; }
+.split-form .btn { grid-column: 1 / -1; }
+.links { list-style: none; display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.links li { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid var(--border); }
+.links li > div:first-child { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; font-size: 14px; }
+.links small { flex-basis: 100%; }
+.visa-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }

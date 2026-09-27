@@ -22,6 +22,20 @@ for (const text of ['black leather sofa under 1500', 'anything cheaper?', 'what 
   console.log(`  ask "${text}" -> ${a.browse?.total ?? 0} matches: ${a.reply}`);
 }
 
+// Visa agent checkout: put two picks in the cart, approve, wait for the agent.
+for (const c of s.categories.slice(0, 2)) await j(`/api/sessions/${s.id}/cart`, { method: 'POST', body: JSON.stringify({ productId: c.productIds[0], qty: 1 }) });
+const quote = await j(`/api/sessions/${s.id}/checkout/quote`);
+console.log(`checkout: $${quote.total} from ${quote.groups.length} store(s), Visa ${quote.visa.acceptance}, ${quote.visa.card.label}`);
+await j(`/api/sessions/${s.id}/checkout`, { method: 'POST', body: JSON.stringify({ via: 'phone', allowOverBudget: true }) });
+let co: any;
+for (let i = 0; i < 40; i++) { await sleep(700); co = (await j(`/api/sessions/${s.id}`)).checkout; if (co.status !== 'running') break; }
+console.log(`  ${co.status}: ${co.summary}`);
+for (const o of co.orders) console.log(`  ${o.store}: ${o.status} ${o.payment?.provider ?? ''} ${o.payment?.id ?? ''}`);
+for (const mode of ['valid', 'signature', 'replay', 'over_mandate']) {
+  const t = await j('/api/visa/tamper', { method: 'POST', body: JSON.stringify({ mode }) });
+  console.log(`  TAP ${mode}: ${t.accepted ? 'accepted' : `rejected (${t.reason})`}`);
+}
+
 const picks = s.categories.map((c: any) => c.productIds[0]).filter(Boolean).slice(0, 5);
 for (const id of picks) await j(`/api/products/${id}/model`, { method: 'POST', body: JSON.stringify({ generate: false }) });
 for (let i = 0; i < 30; i++) {

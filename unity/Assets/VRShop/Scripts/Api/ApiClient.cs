@@ -47,6 +47,9 @@ namespace VRShop.Api
         public Task<SearchResponse> Search(string id, string text) => Send<SearchResponse>("POST", $"/api/sessions/{id}/search", new { text }, 60);
         public Task<VoiceResponse> Ask(string id, string text, string focusProductId = null) => Send<VoiceResponse>("POST", $"/api/sessions/{id}/ask", new { text, focusProductId }, 60);
         public Task<Session> SetBrowse(string id, Filters filters) => Send<Session>("PUT", $"/api/sessions/{id}/browse", new { filters });
+        public Task<Quote> Quote(string id) => Send<Quote>("GET", $"/api/sessions/{id}/checkout/quote");
+        public Task<Session> StartCheckout(string id, bool allowOverBudget) => Send<Session>("POST", $"/api/sessions/{id}/checkout", new { via = "headset", allowOverBudget });
+        public Task<Session> Swap(string id, string from, string to) => Send<Session>("POST", $"/api/sessions/{id}/cart/swap", new { from, to });
         public Task<BrowseMoreResponse> BrowseMore(string id) => Send<BrowseMoreResponse>("POST", $"/api/sessions/{id}/browse/more", new { }, 60);
 
         public async Task<VoiceResponse> Voice(string sessionId, byte[] wav, string focusProductId = null)

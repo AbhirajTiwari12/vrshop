@@ -1,12 +1,13 @@
 import { categoryDef, normalizeCategory } from './catalog.js';
 import { config } from './config.js';
 import { analyzeRoom, rankProducts, voiceIntent, type VoiceIntent } from './ai/designer.js';
-import { answer, interpret, short, type Action } from './ai/assistant.js';
+import { answer, interpret, short, superlative, type Action } from './ai/assistant.js';
 import { searchIkea, ikeaHasModel } from './search/ikea.js';
 import { immersiveDetails, searchShopping } from './search/serp.js';
 import { addProducts, allMatches, hasQuery, queryInventory, queryKey, recordQuery } from './inventory/inventory.js';
 import { describeFilters, isEmpty, normalizeFilters } from './inventory/filters.js';
 import { liveSearchBudgetLeft } from './inventory/usage.js';
+import { buildQuote } from './pay/quote.js';
 import { ensureModel } from './models/pipeline.js';
 import { getProduct, getSession, newId, saveSession, updateProduct, upsertProduct } from './store.js';
 import { mapLimit } from './util/http.js';
@@ -156,7 +157,7 @@ export async function sessionSearch(id: string, text: string, intent?: VoiceInte
 
 /** Session plus every referenced product, in one payload (what the headset and phone render). */
 export function expandSession(s: Session) {
-  const ids = new Set<string>([...s.categories.flatMap((c) => c.productIds), ...(s.browse?.productIds ?? []), ...s.cart.map((c) => c.productId), ...s.placements.map((p) => p.productId)]);
+  const ids = new Set<string>([...s.categories.flatMap((c) => c.productIds), ...(s.browse?.productIds ?? []), ...s.cart.map((c) => c.productId), ...s.placements.map((p) => p.productId), ...(s.checkout?.orders.flatMap((o) => o.items.map((i) => i.productId)) ?? [])]);
   const products: Record<string, Product> = {};
   for (const pid of ids) {
     const p = getProduct(pid);
@@ -271,19 +272,32 @@ export async function sessionAsk(id: string, text: string, opts: { via?: 'voice'
   const browse = changed ? await setBrowse(id, f, { live: true }) : prev;
 
   const parts: string[] = [];
-  if (changed && browse) {
+  // Only announce results when what's being shown really changed (not just the sort order behind an action).
+  const { sort: _a, ...before } = prev?.filters ?? {};
+  const { sort: _b, ...after } = browse?.filters ?? {};
+  const announce = changed && (it.action === 'none' || JSON.stringify(before) !== JSON.stringify(after));
+  if (announce && browse) {
     const what = describeFilters(browse.filters, browse.total);
     if (browse.total === 0) parts.push(`I couldn't find any ${what}${browse.liveSearched ? ', even after checking stores' : ''}. Try a higher price or fewer filters.`);
     else if (isEmpty(browse.filters)) parts.push(`Showing everything: ${browse.total} pieces.`);
     else parts.push(`${browse.liveSearched ? 'I checked stores too. ' : ''}Found ${browse.total} ${what}.`);
   }
-  const facts = answer(it.question, browse ? allMatches(browse.filters) : [], { budget: s.budget, cartTotal });
+  const matches = browse ? allMatches(browse.filters) : [];
+  // "Add the cheapest one": the target comes from the real results, not a list position.
+  const pick = it.action !== 'none' && it.action !== 'checkout' ? superlative(it.question, matches) : undefined;
+  const facts = pick ? '' : answer(it.question, matches, { budget: s.budget, cartTotal });
   if (facts) parts.push(facts);
 
-  const target = it.target;
+  let target = it.target ?? pick;
+  if (target && !getProduct(target.id)) upsertProduct({ ...target });
+  target = target ? getProduct(target.id) ?? target : undefined;
   if ((it.action === 'add_to_cart' || it.action === 'remove_from_cart') && target) {
     setCartQty(id, target.id, it.action === 'add_to_cart' ? 1 : 0);
     parts.push(it.action === 'add_to_cart' ? `Added ${short(target)} to your cart.` : `Removed ${short(target)} from your cart.`);
+  } else if (it.action === 'checkout') {
+    const q = buildQuote(getSession(id)!);
+    parts.push(!q.groups.length ? 'Your cart is empty. Add a few pieces first.'
+      : `That’s $${q.total.toLocaleString('en-US', { maximumFractionDigits: 2 })} from ${q.groups.length} store${q.groups.length === 1 ? '' : 's'}${q.budget ? ` against your $${q.budget.toLocaleString('en-US')} budget` : ''}.${q.overBy > 0 ? ` You’re $${Math.round(q.overBy).toLocaleString('en-US')} over; I found cheaper swaps.` : ''} Approve it with Visa and I’ll check out at every store.`);
   } else if (it.action !== 'none' && !target) {
     parts.push('Which one? Say “the second one”, or open it first.');
   } else if (target && it.action === 'open') {
@@ -291,7 +305,8 @@ export async function sessionAsk(id: string, text: string, opts: { via?: 'voice'
   } else if (target && it.action === 'place') {
     parts.push(`Placing ${short(target)} in your room.`);
   }
-  if (it.reply && !(changed && /\b\d+\b.*\b(results|options|items|found)\b/i.test(it.reply))) parts.push(it.reply);
+  // The server already said what it did for actions; the model's own sentence would repeat it.
+  if (it.reply && it.action === 'none' && !(changed && /\b\d+\b.*\b(results|options|items|found)\b/i.test(it.reply))) parts.push(it.reply);
   const reply = parts.join(' ').replace(/\s+/g, ' ').trim() || 'Okay.';
 
   const cur = getSession(id)!;

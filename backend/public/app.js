@@ -166,6 +166,9 @@ const state = {
   filtersOpen: false,
   focusId: null, // product the user last opened ("how much is this one?")
   rec: null, // { recorder, chunks, stream } while the mic is on
+  quote: null, // { key, data } checkout quote for the current cart
+  paying: false, // approve request in flight
+  tamper: [], // tamper-demo results
 };
 
 // ============================================================================ API
@@ -414,7 +417,7 @@ async function pollLoop(seq) {
   }
   if (seq !== poll.seq) return;
   const s = state.session;
-  const delay = poll.fails ? Math.min(10000, 2000 * poll.fails) : isBusy(s) || !s ? 2000 : hasPendingModels(s) ? 2500 : 5000;
+  const delay = poll.fails ? Math.min(10000, 2000 * poll.fails) : s?.checkout?.status === 'running' ? 800 : isBusy(s) || !s ? 2000 : hasPendingModels(s) ? 2500 : 5000;
   poll.timer = setTimeout(() => pollLoop(seq), delay);
 }
 
@@ -1294,8 +1297,9 @@ function viewCart() {
   app.innerHTML = `
     <div class="page-head"><h1>Your cart</h1><p class="muted" id="c-sub">&nbsp;</p></div>
     <div id="c-budget"></div>
+    <div id="c-visa" class="stack"></div>
     <div id="c-groups" class="stack"></div>
-    <p class="note">${icon('info')}<span>Checkout happens on each retailer’s website. Prices from live listings.</span></p>
+    <p class="note" id="c-note">${icon('info')}<span>Prices from live listings. Retailer fulfilment is simulated; the Visa authorization and agent signatures are real when Visa sandbox keys are configured.</span></p>
   `;
   renderCart();
 }
@@ -1314,9 +1318,11 @@ function renderCart() {
     .filter((x) => x.p)
     .sort((a, b) => (state.cartOrder.get(a.productId) ?? 1e9) - (state.cartOrder.get(b.productId) ?? 1e9));
   const count = items.reduce((n, x) => n + x.qty, 0);
+  renderVisa(s, items);
   if (!items.length) {
-    $('#c-sub').textContent = 'Nothing here yet';
+    $('#c-sub').textContent = s.checkout ? 'Bought with Visa' : 'Nothing here yet';
     setHTML($('#c-budget'), '');
+    if (s.checkout) { setHTML($('#c-groups'), ''); return; }
     setHTML($('#c-groups'), `<section class="card empty"><div class="empty-icon">${icon('bag')}</div><h2>Your cart is empty</h2><p>Tap “Add to cart” on anything you like, or add items while you’re walking around in VR.</p><a class="btn btn-primary" href="#/s/${encodeURIComponent(s.id)}">${icon('sofa')} Browse your picks</a></section>`);
     return;
   }
@@ -1385,8 +1391,161 @@ function storeGroupHtml(storeName, list, currency) {
   </section>`;
 }
 
-document.addEventListener('toggle', (e) => {
+// ============================================================================ VISA CHECKOUT ("buy the room")
+const cartKey = (s) => (s?.cart ?? []).map((c) => `${c.productId}:${c.qty}`).join(',');
+
+async function loadQuote(s) {
+  const key = cartKey(s);
+  if (state.quote?.key === key || state.quote?.loading === key) return;
+  state.quote = { ...(state.quote ?? {}), loading: key };
+  try {
+    const data = await api(`/api/sessions/${encodeURIComponent(s.id)}/checkout/quote`);
+    state.quote = { key, data };
+  } catch { state.quote = null; }
+  if (state.route.name === 'cart') renderCart();
+}
+
+const STATUS_TXT = { pending: 'Waiting', authorized: 'Authorized', declined: 'Declined', rejected: 'Rejected', error: 'Error', voided: 'Cancelled' };
+const ORDER_PILL = { pending: 'pill', authorized: 'pill pill-success', declined: 'pill pill-danger', rejected: 'pill pill-danger', error: 'pill pill-danger', voided: 'pill pill-warn' };
+
+function visaBadge(v) {
+  return v?.acceptance === 'sandbox'
+    ? `<span class="pill pill-success" title="Real authorizations on ${esc(v.acceptanceHost)}">${icon('check')} Visa Acceptance sandbox</span>`
+    : `<span class="pill pill-warn" title="Add VISA_ACCEPTANCE_* keys in backend/.env for real sandbox authorizations">Visa simulated</span>`;
+}
+
+function renderVisa(s, items) {
+  const el = $('#c-visa');
+  if (!el) return;
+  const c = s.checkout;
+  if (items.length) loadQuote(s);
+  const q = items.length && state.quote?.key === cartKey(s) ? state.quote.data : null;
+  const parts = [];
+  if (c) parts.push(checkoutHtml(c));
+  if (items.length && (!c || c.status !== 'running')) parts.push(q ? approveHtml(s, q) : '<section class="card"><div class="skel skel-line" style="width:50%;margin:0"></div><div class="skel" style="height:52px;margin-top:14px"></div></section>');
+  if (c && c.status !== 'running' && c.orders.some((o) => o.status === 'authorized')) parts.push(splitHtml(s));
+  if (c || items.length) parts.push(securityHtml(q?.visa ?? null));
+  setHTML(el, parts.join(''));
+}
+
+function approveHtml(s, q) {
+  const over = q.overBy > 0;
+  const swaps = q.swaps.map((w) => `<li class="swap">
+      <img src="${esc(proxy(w.from.imageUrl, 128))}" alt="" data-fallback><span class="arrow">→</span><img src="${esc(proxy(w.to.imageUrl, 128))}" alt="" data-fallback>
+      <div class="swap-main"><b>${esc(shortTitle(w.to.title))}</b><span class="muted">${esc(w.to.store)} · ${money(w.to.price)} · ${esc(w.why)}</span></div>
+      <button type="button" class="btn btn-sm btn-soft" data-action="swap" data-from="${esc(w.from.productId)}" data-to="${esc(w.to.productId)}">Save ${money(w.saves)}</button>
+    </li>`).join('');
+  const cap = q.budget && !over ? q.budget : q.total;
+  return `<section class="card visa-card">
+    <div class="visa-head"><div class="visa-logo">VISA</div><div><h2>Buy the room</h2><p class="muted">Approve once. Your AI agent checks out at ${q.groups.length === 1 ? esc(q.groups[0].store) : `all ${q.groups.length} stores`}.</p><div class="visa-pills">${visaBadge(q.visa)}</div></div></div>
+    <div class="mandate">
+      <div class="m-row"><span>Pay with</span><b>${esc(q.visa.card.label)}</b></div>
+      ${q.groups.map((g) => `<div class="m-row"><span>${esc(g.store)} <span class="faint">· ${g.items.length} item${g.items.length === 1 ? '' : 's'}</span></span><b>${money(g.subtotal)}</b></div>`).join('')}
+      <div class="m-row total"><span>Agent spending cap</span><b>${money(cap)}</b></div>
+      <p class="faint m-note">The cap${q.budget ? ' is your room budget and' : ''} can’t be exceeded: each retailer can only charge what’s listed above, for 15 minutes.</p>
+    </div>
+    ${q.unpriced.length ? `<p class="muted" style="font-size:13px">${q.unpriced.length} item(s) without a listed price will be skipped.</p>` : ''}
+    ${over ? `<div class="coach"><h3>${icon('sparkles')} ${money(q.overBy)} over budget: cheaper look-alikes</h3>${swaps ? `<ul>${swaps}</ul>` : '<p class="muted">No cheaper matches in the catalog. Remove something, or approve the higher amount.</p>'}</div>` : ''}
+    ${over
+      ? `<button type="button" class="btn btn-secondary btn-block" data-action="approve" data-over="1" ${state.paying ? 'disabled' : ''}>Approve ${money(q.total)} anyway</button>`
+      : `<button type="button" class="btn btn-primary btn-xl visa-pay" data-action="approve" ${state.paying ? 'disabled' : ''}>${state.paying ? '<span class="mini-spin"></span>' : icon('check')} Approve ${money(q.total)} with Visa</button>`}
+  </section>`;
+}
+
+function checkoutHtml(c) {
+  const m = c.mandate;
+  const head = c.status === 'running'
+    ? `<span class="pill pill-accent"><span class="mini-spin"></span>Agent checking out</span>`
+    : c.status === 'done' ? `<span class="pill pill-success">${icon('check')} Done</span>` : c.status === 'partial' ? '<span class="pill pill-warn">Partly bought</span>' : '<span class="pill pill-danger">Not bought</span>';
+  const orders = c.orders.map((o) => `<li class="order">
+      <div class="order-head"><div class="store-logo">${esc(o.store.charAt(0).toUpperCase())}</div><div><b>${esc(o.store)}</b><span class="muted">${o.items.length} item${o.items.length === 1 ? '' : 's'} · ${money(o.amount)}</span></div><span class="${ORDER_PILL[o.status]}">${STATUS_TXT[o.status]}</span></div>
+      <ol class="steps">${o.steps.map((st) => `<li class="${st.ok ? 'ok' : 'bad'}">${icon(st.ok ? 'check' : 'x')}<div><span>${esc(st.label)}</span>${st.detail ? `<small>${esc(st.detail)}</small>` : ''}</div></li>`).join('')}${o.status === 'pending' && c.status === 'running' ? '<li class="wait"><span class="mini-spin"></span><div><span>Waiting…</span></div></li>' : ''}</ol>
+      ${o.status === 'authorized' ? `<button type="button" class="btn btn-sm btn-ghost" data-action="void-order" data-id="${esc(o.id)}">Cancel this order</button>` : ''}
+    </li>`).join('');
+  return `<section class="card visa-card">
+    <div class="visa-head"><div class="visa-logo">VISA</div><div><h2>Agent checkout</h2><p class="muted">${esc(c.summary ?? `Spending cap ${money(m.totalCap)} · approved on your ${m.approval.via}`)}</p><div class="visa-pills">${head}${c.orders.some((o) => o.payment?.provider === 'visa_acceptance') ? visaBadge({ acceptance: 'sandbox', acceptanceHost: 'Visa Acceptance' }) : c.orders.some((o) => o.payment) ? visaBadge({ acceptance: 'simulated' }) : ''}</div></div></div>
+    <div class="mandate compact">
+      <div class="m-row"><span>Mandate</span><b class="mono">${esc(m.id)}</b></div>
+      <div class="m-row"><span>Spent / cap</span><b>${money(m.spent)} / ${money(m.totalCap)}</b></div>
+      <div class="m-row"><span>Card</span><b>${esc(m.card.label)}</b></div>
+    </div>
+    <ul class="orders">${orders}</ul>
+    <details class="vic"><summary>View as a Visa Intelligent Commerce instruction ${icon('chevronDown', 'chev')}</summary><pre class="mono" id="vic-json">Loading…</pre></details>
+  </section>`;
+}
+
+function splitHtml(s) {
+  const links = (s.splits ?? []).slice().reverse().map((l) => `<li><div><b>${esc(l.to)}</b> · ${money(l.amount)} <span class="${l.provider === 'visa_acceptance' ? 'pill pill-success' : 'pill pill-warn'}">${l.provider === 'visa_acceptance' ? 'Visa Pay by Link' : 'simulated'}</span>${l.note ? `<small class="faint">${esc(l.note)}</small>` : ''}</div>
+      <div class="btn-pair"><a class="btn btn-sm btn-secondary" href="${esc(l.url)}" target="_blank" rel="noopener">Open</a><button type="button" class="btn btn-sm btn-soft" data-action="share-link" data-url="${esc(l.url)}" data-amount="${l.amount}">Share</button></div></li>`).join('');
+  return `<section class="card split-card">
+    <h2>Split it with a roommate</h2>
+    <p class="muted">Send a Visa Pay by Link for their share. They pay on a hosted Visa checkout page.</p>
+    <div class="split-form"><input id="split-to" type="text" maxlength="40" placeholder="Roommate’s name" aria-label="Roommate’s name">
+      <select id="split-share" aria-label="Share"><option value="0.5">Half</option><option value="0.3333">A third</option><option value="0.25">A quarter</option></select>
+      <button type="button" class="btn btn-sm btn-primary" data-action="split">Create link</button></div>
+    ${links ? `<ul class="links">${links}</ul>` : ''}
+  </section>`;
+}
+
+const TAMPER = [['valid', 'Valid agent order'], ['signature', 'Forged signature'], ['expired', 'Expired signature'], ['replay', 'Replayed request'], ['wrong_merchant', 'Signed for another store'], ['unknown_key', 'Unknown agent key'], ['wrong_tag', 'Browsing tag used to pay'], ['stolen_container', 'Stolen payment container'], ['over_mandate', 'Charge over the mandate'], ['unsigned', 'Unsigned bot']];
+
+function securityHtml(v) {
+  const results = state.tamper.map((r) => `<li class="${r.accepted ? 'ok' : 'bad'}">${icon(r.accepted ? 'check' : 'x')}<div><span><b>${esc(TAMPER.find((t) => t[0] === r.mode)?.[1] ?? r.mode)}</b>: ${r.accepted ? 'accepted' : 'rejected'}</span><small>${esc(r.reason ?? r.steps?.[r.steps.length - 1]?.detail ?? '')}</small></div></li>`).join('');
+  return `<details class="card security" ${state.tamper.length ? 'open' : ''}>
+    <summary><span>${icon('check')} How the agent is trusted</span>${icon('chevronDown', 'chev')}</summary>
+    <p class="muted">Every checkout request is signed with <b>Visa Trusted Agent Protocol</b> (Ed25519 HTTP message signature over the store and path, 8-minute window, one-time nonce, “agent-payer-auth” tag). Retailers verify it against the agent’s public key directory, then check the order against your mandate before Visa authorizes the card.</p>
+    ${v ? `<p class="faint mono" style="font-size:12px;word-break:break-all">Agent key ${esc(v.tapKeyId)} · <a href="/.well-known/jwks" target="_blank" rel="noopener">key directory (JWKS)</a></p>` : ''}
+    <h3 class="mini-title" style="margin-top:12px">Try to break it</h3>
+    <div class="chips">${TAMPER.map(([k, l]) => `<button type="button" class="chip" data-action="tamper" data-mode="${k}">${esc(l)}</button>`).join('')}</div>
+    ${results ? `<ol class="steps tamper">${results}</ol>` : ''}
+  </details>`;
+}
+
+async function approveCheckout(over) {
+  const s = state.session;
+  if (!s || state.paying) return;
+  state.paying = true;
+  renderCart();
+  try {
+    const d = await api(`/api/sessions/${encodeURIComponent(s.id)}/checkout`, { method: 'POST', body: { via: 'phone', allowOverBudget: !!over } });
+    state.paying = false;
+    applySession(d);
+    kickPoll();
+    $('#c-visa')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) {
+    state.paying = false;
+    renderCart();
+    toast(e.message || 'Checkout failed.', { type: 'error' });
+  }
+}
+
+async function postAndApply(path, body, okMsg) {
+  const s = state.session;
+  if (!s) return;
+  try {
+    const d = await api(`/api/sessions/${encodeURIComponent(s.id)}${path}`, { method: 'POST', body: body ?? {} });
+    applySession(d);
+    if (okMsg) toast(okMsg, { type: 'success' });
+  } catch (e) { toast(e.message || 'Request failed.', { type: 'error' }); }
+}
+
+async function runTamper(mode) {
+  try {
+    const r = await api('/api/visa/tamper', { method: 'POST', body: { mode } });
+    state.tamper = [r, ...state.tamper.filter((x) => x.mode !== mode)].slice(0, 9);
+    renderCart();
+  } catch (e) { toast(e.message || 'Demo failed.', { type: 'error' }); }
+}
+
+document.addEventListener('toggle', async (e) => {
   const d = e.target;
+  if (d instanceof HTMLDetailsElement && d.classList.contains('vic') && d.open && state.session) {
+    try {
+      const j = await api(`/api/sessions/${encodeURIComponent(state.session.id)}/checkout/instruction`);
+      const pre = d.querySelector('pre');
+      if (pre) pre.textContent = JSON.stringify(j, null, 2);
+    } catch { /* keep "Loading…" */ }
+  }
   if (d instanceof HTMLDetailsElement && d.dataset.store) {
     if (d.open) state.openStores.add(d.dataset.store);
     else state.openStores.delete(d.dataset.store);
@@ -1663,6 +1822,18 @@ document.addEventListener('click', (e) => {
     case 'browse-more': state.browseShown += BROWSE_PAGE; renderSession(); break;
     case 'search-stores': searchStores(); break;
     case 'copy-code': copyCode(t.dataset.code); break;
+    case 'approve': approveCheckout(t.dataset.over === '1'); break;
+    case 'swap': postAndApply('/cart/swap', { from: t.dataset.from, to: t.dataset.to }, 'Swapped for the cheaper look-alike.'); break;
+    case 'void-order': postAndApply(`/checkout/orders/${encodeURIComponent(id)}/void`, {}, 'Order cancelled and the Visa authorization reversed.'); break;
+    case 'tamper': runTamper(t.dataset.mode); break;
+    case 'split': postAndApply('/split', { to: $('#split-to')?.value.trim(), share: Number($('#split-share')?.value) }, 'Payment link created.'); break;
+    case 'share-link': {
+      const url = new URL(t.dataset.url, location.href).href;
+      const text = `Your share of our room: $${Number(t.dataset.amount).toFixed(2)}`;
+      if (navigator.share) navigator.share({ title: 'VRShop', text, url }).catch(() => {});
+      else navigator.clipboard?.writeText(`${text} ${url}`).then(() => toast('Link copied.', { type: 'success' }));
+      break;
+    }
     case 'open-photo': openPhoto(t.dataset.src); break;
     case 'close-modal': closeModal(); break;
   }

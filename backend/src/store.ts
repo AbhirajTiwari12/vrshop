@@ -31,6 +31,11 @@ function load(): Db {
         s.status = 'error';
         s.error = 'Server restarted during processing';
       }
+      if (s.checkout?.status === 'running') {
+        s.checkout.status = s.checkout.orders.some((o) => o.status === 'authorized') ? 'partial' : 'failed';
+        s.checkout.summary = 'The server restarted during checkout; pending orders were not placed.';
+        s.checkout.mandate.status = 'completed';
+      }
     }
     return { sessions: parsed.sessions ?? {}, products: parsed.products ?? {} };
   } catch {

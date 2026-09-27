@@ -11,7 +11,7 @@ import { chatJson, hasOpenAI } from './openai.js';
 
 export const QUESTIONS = ['none', 'cheapest', 'most_expensive', 'price_range', 'average_price', 'count', 'best_rated', 'budget_left'] as const;
 export type Question = (typeof QUESTIONS)[number];
-export const ACTIONS = ['none', 'open', 'add_to_cart', 'remove_from_cart', 'place'] as const;
+export const ACTIONS = ['none', 'open', 'add_to_cart', 'remove_from_cart', 'place', 'checkout'] as const;
 export type Action = (typeof ACTIONS)[number];
 
 export interface AssistantContext {
@@ -83,10 +83,12 @@ question (the app answers it with real numbers from the NEW results — never st
 cheapest, most_expensive, price_range, average_price, count, best_rated, budget_left (budget/cart), or none.
 
 target: 1-based number of the listed item the user refers to ("the second one" = 2, "the black one" = the matching item). 0 = the focused item or none. -1 if nothing specific.
-action: open (details), add_to_cart ("add it", "I'll take it"), remove_from_cart, place ("show it in my room", "put it here"), or none.
+For "the cheapest / most expensive / best rated one" set question accordingly and target -1: the app picks that item from the real results.
+action: open (details), add_to_cart ("add it", "I'll take it"), remove_from_cart, place ("show it in my room", "put it here"),
+checkout ("buy the room", "check out", "buy everything in my cart" — the app then asks the user to approve the payment; never claim it's paid), or none.
 atPointer: true if they refer to a spot ("here", "in this corner", "next to the couch").
 
-reply: one short friendly spoken sentence (max 20 words). When you change filters, do NOT say how many results there are or quote aggregate prices (the app adds that). You MAY answer questions about a specific listed item using its data (price, size, store). If the request isn't about shopping, answer briefly and keep the filters.`;
+reply: one short friendly spoken sentence (max 20 words), or "" when the turn only changes filters or asks an aggregate question (the app already announces "Found N ..." and the numbers — don't repeat what you're searching for). Never say how many results there are or quote aggregate prices. You MAY answer questions about a specific listed item using its data (price, size, store). If the request isn't about shopping, answer briefly and keep the filters.`;
 
 export async function interpret(text: string, ctx: AssistantContext): Promise<Interpretation> {
   if (!hasOpenAI()) return heuristicInterpret(text, ctx);
@@ -185,7 +187,8 @@ export function heuristicInterpret(text: string, ctx: AssistantContext): Interpr
   const ord = Object.entries(ORDINALS).find(([w]) => new RegExp(`\\b${w}\\b`).test(t));
   const target = ord ? (ord[1] === -1 ? ctx.visible[ctx.visible.length - 1] : ctx.visible[ord[1] - 1]) : /\b(this|that|it)\b/.test(t) ? ctx.focused : undefined;
   const action: Action =
-    /\b(add|put)\b.*\bcart\b|\bi'?ll take\b|\bbuy\b/.test(t) ? 'add_to_cart'
+    /\b(check ?out|buy (it all|everything|the (whole )?room|my cart)|place (the|my) order|pay for (it all|everything))\b/.test(t) ? 'checkout'
+      : /\b(add|put)\b.*\bcart\b|\bi'?ll take\b|\bbuy\b/.test(t) ? 'add_to_cart'
       : /\bremove\b.*\bcart\b/.test(t) ? 'remove_from_cart'
         : /\b(place|show (it|me) in (my|the) room|put (it|this) (here|there))\b/.test(t) ? 'place'
           : /\b(open|details|tell me (more )?about)\b/.test(t) ? 'open' : 'none';
@@ -201,6 +204,15 @@ export function heuristicInterpret(text: string, ctx: AssistantContext): Interpr
 
 const money = (v: number) => `$${v % 1 === 0 ? v.toLocaleString('en-US') : v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 export const short = (p: Product) => p.title.length > 60 ? `${p.title.slice(0, 57).trim()}…` : p.title;
+
+/** The single listing a superlative question points at ("add the cheapest one"). */
+export function superlative(q: Question, matches: Product[]): Product | undefined {
+  const priced = matches.filter((p) => p.price != null);
+  if (q === 'cheapest') return [...priced].sort((a, b) => a.price! - b.price!)[0];
+  if (q === 'most_expensive') return [...priced].sort((a, b) => b.price! - a.price!)[0];
+  if (q === 'best_rated') return [...matches].filter((x) => x.rating && (x.reviews ?? 0) >= 3).sort((a, b) => b.rating! - a.rating! || (b.reviews ?? 0) - (a.reviews ?? 0))[0];
+  return undefined;
+}
 
 /** The factual part of the answer, computed from the listings (all matches, not just the first page). */
 export function answer(q: Question, matches: Product[], session: { budget: number | null; cartTotal: number }): string {

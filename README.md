@@ -25,6 +25,7 @@ walk around them, check they fit, let AI arrange the room, and check out with st
 | [`backend/`](backend) | Node/TypeScript API: room analysis, product search, 3D model pipeline, layout solver, voice, image proxy. Also serves the phone web app. |
 | [`backend/public/`](backend/public) | Phone companion web app (capture, recommendations, 3D preview, cart). |
 | [`unity/`](unity) | Quest 2 app for Unity 6000.3.13f1 — see [`unity/README.md`](unity/README.md) for the step-by-step setup. |
+| [`docs/VISA.md`](docs/VISA.md) | **Visa track:** AI agent checkout ("buy the room") on Visa Acceptance + Trusted Agent Protocol, mandates, budget coach, tamper demo, setup and demo script. |
 | [`docs/PLAN.md`](docs/PLAN.md) | The full plan: architecture decisions, research, 3-day schedule, demo script, LiDAR upgrade path. |
 
 ## Quick start
@@ -83,6 +84,7 @@ the backend with `cloudflared tunnel --url http://localhost:8787` and use the ht
 | 3D models | IKEA official GLBs (~80% of IKEA items) + AI-generated from listing photos | IKEA official GLBs + true-size procedural stand-ins |
 | Voice / chat shopping assistant | OpenAI transcription + filter/intent parsing over the pulled catalog | keyword parser (typing works; voice needs the key for transcription) |
 | Manual filters (category, price, color, material, store, sort, 3D-only) | same | same |
+| Checkout ("buy the room") | AI agent checks out per store: Visa TAP-signed orders, mandate capped at the budget, Visa Acceptance sandbox authorizations (`VISA_ACCEPTANCE_*` keys) | same flow, authorizations labelled "simulated" |
 | Layout ("Design my room") | deterministic solver over your real room geometry | same |
 
 Before a demo: `npm run reset` clears old sessions (keeps the cached 3D models), then create a fresh room from the phone.

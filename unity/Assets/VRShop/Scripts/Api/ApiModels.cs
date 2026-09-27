@@ -119,6 +119,44 @@ namespace VRShop.Api
 
     public class ChatTurn { public string role; public string text; public string via; }
 
+    // ---- Visa agent checkout ("buy the room") ----
+    public class CardInfo { public string brand; public string last4; public string label; }
+    public class MandateMerchant { public string store; public float cap; }
+    public class Mandate
+    {
+        public string id;
+        public string status;       // active | completed | expired | revoked
+        public float totalCap, spent;
+        public long expiresAt;
+        public List<MandateMerchant> merchants = new List<MandateMerchant>();
+        public CardInfo card;
+    }
+    public class OrderStep { public string label; public bool ok; public string detail; }
+    public class PaymentInfo { public string provider; public string id; public string status; public string approvalCode; }
+    public class Order
+    {
+        public string id, store, status;  // pending | authorized | declined | rejected | error | voided
+        public float amount;
+        public List<OrderStep> steps = new List<OrderStep>();
+        public PaymentInfo payment;
+        public string merchantOrderId;
+    }
+    public class Checkout { public string status; public Mandate mandate; public List<Order> orders = new List<Order>(); public string summary; }
+
+    public class QuoteItem { public string productId, title; public int qty; public float unitPrice; }
+    public class QuoteGroup { public string store; public float subtotal; public List<QuoteItem> items = new List<QuoteItem>(); }
+    public class SwapTarget { public string productId, title, store; public float price; }
+    public class Swap { public QuoteItem from; public SwapTarget to; public float saves; public string why; }
+    public class VisaStatus { public string acceptance; public string tapKeyId; public CardInfo card; }
+    public class Quote
+    {
+        public float total, overBy;
+        public float? budget;
+        public List<QuoteGroup> groups = new List<QuoteGroup>();
+        public List<Swap> swaps = new List<Swap>();
+        public VisaStatus visa;
+    }
+
     public class PaletteColor { public string hex; public string name; }
     public class Lighting { public string mood; public float brightness; public float kelvin; }
     public class Surface { public string material; public string colorHex; }
@@ -183,6 +221,7 @@ namespace VRShop.Api
         public List<Placement> placements = new List<Placement>();
         public Dictionary<string, Product> products = new Dictionary<string, Product>();
         public BrowseResult browse;
+        public Checkout checkout;
         public List<ChatTurn> chat = new List<ChatTurn>();
         public float cartTotal;
         public long updatedAt;
