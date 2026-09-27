@@ -223,6 +223,8 @@ namespace VRShop.Api
         public BrowseResult browse;
         public Checkout checkout;
         public List<ChatTurn> chat = new List<ChatTurn>();
+        /// <summary>The user's real furniture (Space Setup boxes) by anchor id: keep or replace.</summary>
+        public Dictionary<string, RealPieceDto> realFurniture = new Dictionary<string, RealPieceDto>();
         public float cartTotal;
         public long updatedAt;
 
@@ -233,7 +235,27 @@ namespace VRShop.Api
     // ---- Room geometry sent to the backend (Unity world space, meters) ----
     public class XZ { public float x, z; }
     public class WallDto { public Vec3 center; public Vec3 normal; public float width, height; }
-    public class ObjectDto { public string label; public Vec3 center; public Vec3 size; public float yawDeg; }
+    public class ObjectDto { public string id; public string label; public Vec3 center; public Vec3 size; public float yawDeg; }
+
+    /// <summary>One real piece of furniture and the user's decision about it (backend/src/types.ts RealPiece).</summary>
+    public class RealPieceDto
+    {
+        public string id;
+        public string label;            // COUCH, TABLE, STORAGE, ...
+        public string category;         // our furniture type for it; null = user picks
+        public string categorySource;   // auto | user
+        public List<string> choices = new List<string>();
+        public string state;            // keep | replace
+        public string replacementId;
+        public long updatedAt;
+    }
+
+    public class CandidatesResponse { public string pieceId; public string category; public List<Product> products = new List<Product>(); }
+
+    /// <summary>An item "Design my room" must leave where it is (a replacement in its real piece's spot).</summary>
+    public class FixedPlacement { public string productId; public Vec3 position; public float yawDeg; public string reason; }
+
+    public class ReplaceResult { public string pieceId; public string category; public List<string> productIds = new List<string>(); public List<Product> products = new List<Product>(); }
     public class UserDto { public Vec3 position; public Vec3 forward; }
 
     public class RoomGeometryDto
@@ -255,12 +277,13 @@ namespace VRShop.Api
     {
         public string transcript;
         public string reply;
-        public string action;     // none | open | add_to_cart | remove_from_cart | place | checkout
+        public string action;     // none | open | add_to_cart | remove_from_cart | place | checkout | replace
         public string productId;  // the product the action/question refers to
         public bool atPointer;
         public BrowseResult browse;
         public Session session;
         public string speechUrl;  // the reply as speech (WAV), when the server has text to speech
+        public ReplaceResult replace; // action replace: which real piece, and the products that can stand in for it
         public string error;
     }
 

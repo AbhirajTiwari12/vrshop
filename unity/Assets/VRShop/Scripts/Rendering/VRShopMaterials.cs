@@ -15,6 +15,7 @@ namespace VRShop.Rendering
 
         public static Material ShadowCatcher => Get("ShadowCatcher", "VRShop/ShadowCatcher");
         public static Material DepthOccluder => Get("DepthOccluder", "VRShop/DepthOccluder");
+        public static Material RoomCover => Get("RoomCover", "VRShop/RoomCover");
         public static Material BlobShadow => Get("BlobShadow", "VRShop/BlobShadow");
         public static Material UnlitColor => Get("UnlitColor", "Universal Render Pipeline/Unlit");
         public static Material UnlitTransparent => Get("UnlitTransparent", "VRShop/UnlitTransparent");

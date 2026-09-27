@@ -1,4 +1,4 @@
-import { categoryDef, normalizeCategory } from './catalog.js';
+import { categoryDef, matchCategory, normalizeCategory } from './catalog.js';
 import { config } from './config.js';
 import { analyzeRoom, rankProducts, voiceIntent, type VoiceIntent } from './ai/designer.js';
 import { answer, interpret, short, superlative, type Action } from './ai/assistant.js';
@@ -8,6 +8,8 @@ import { trySearchShopping } from './search/serp.js';
 import { addProducts, allMatches, hasQuery, inventoryProduct, queryInventory, queryKey, recordQuery } from './inventory/inventory.js';
 import { describeFilters, isEmpty, normalizeFilters } from './inventory/filters.js';
 import { buildQuote } from './pay/quote.js';
+import { describePieces, findPiece, pieceBox, replacementCandidates, setPiece } from './realFurniture.js';
+import { labelName } from './realPose.js';
 import { ensureModel } from './models/pipeline.js';
 import { getProduct, getSession, newId, saveSession, upsertProduct } from './store.js';
 import { mapLimit } from './util/http.js';
@@ -157,7 +159,7 @@ export async function sessionSearch(id: string, text: string, intent?: VoiceInte
 
 /** Session plus every referenced product, in one payload (what the headset and phone render). */
 export function expandSession(s: Session) {
-  const ids = new Set<string>([...s.categories.flatMap((c) => c.productIds), ...(s.browse?.productIds ?? []), ...s.cart.map((c) => c.productId), ...s.placements.map((p) => p.productId), ...(s.checkout?.orders.flatMap((o) => o.items.map((i) => i.productId)) ?? [])]);
+  const ids = new Set<string>([...s.categories.flatMap((c) => c.productIds), ...(s.browse?.productIds ?? []), ...s.cart.map((c) => c.productId), ...s.placements.map((p) => p.productId), ...(s.checkout?.orders.flatMap((o) => o.items.map((i) => i.productId)) ?? []), ...Object.values(s.realFurniture ?? {}).flatMap((p) => (p.replacementId ? [p.replacementId] : []))]);
   const products: Record<string, Product> = {};
   for (const pid of ids) {
     const p = getProduct(pid);
@@ -253,10 +255,12 @@ export interface AskResult {
   productId?: string;
   atPointer: boolean;
   browse: BrowseResult | undefined;
+  /** action replace: the real piece being replaced and the products that can stand in for it (first = shown now). */
+  replace?: { pieceId: string; category: string | null; productIds: string[]; products: Product[] };
 }
 
 /** One conversational turn: interpret -> filter the catalog (live top-up if thin) -> answer with real numbers -> act. */
-export async function sessionAsk(id: string, text: string, opts: { via?: 'voice' | 'text'; focusProductId?: string } = {}): Promise<AskResult> {
+export async function sessionAsk(id: string, text: string, opts: { via?: 'voice' | 'text'; focusProductId?: string; pieceId?: string } = {}): Promise<AskResult> {
   const s = getSession(id);
   if (!s) throw Object.assign(new Error('Session not found'), { status: 404 });
   const prev = s.browse;
@@ -273,6 +277,7 @@ export async function sessionAsk(id: string, text: string, opts: { via?: 'voice'
     cartTotal,
     chat: s.chat ?? [],
     stores: queryInventory({}, { limit: 0 }).facets.stores.map((x) => x.value),
+    realFurniture: describePieces(s),
   });
 
   const f = { ...it.filters };
@@ -284,7 +289,7 @@ export async function sessionAsk(id: string, text: string, opts: { via?: 'voice'
   // Only announce results when what's being shown really changed (not just the sort order behind an action).
   const { sort: _a, ...before } = prev?.filters ?? {};
   const { sort: _b, ...after } = browse?.filters ?? {};
-  const announce = changed && (it.action === 'none' || JSON.stringify(before) !== JSON.stringify(after));
+  const announce = changed && it.action !== 'replace' && (it.action === 'none' || JSON.stringify(before) !== JSON.stringify(after));
   if (announce && browse) {
     const what = describeFilters(browse.filters, browse.total);
     if (browse.total === 0) parts.push(`I couldn't find any ${what}${browse.liveSearched ? ', even after checking stores' : ''}. Try a higher price or fewer filters.`);
@@ -297,6 +302,34 @@ export async function sessionAsk(id: string, text: string, opts: { via?: 'voice'
   const facts = pick ? '' : answer(it.question, matches, { budget: s.budget, cartTotal });
   if (facts) parts.push(facts);
 
+  let replace: AskResult['replace'];
+  if (it.action === 'replace') {
+    const piece = findPiece(s, it.replaceTarget ?? text, opts.pieceId);
+    if (!piece || !pieceBox(s, piece.id)) {
+      parts.push(Object.keys(s.realFurniture ?? {}).length
+        ? 'Which piece? Point at it while you talk, or say “replace my couch”.'
+        : 'I can only replace furniture from your Space Setup. Add a box around it there first.');
+    } else {
+      const name = labelName(piece.label);
+      // "Replace my table with a desk" changes the type; otherwise the new piece is the same kind as the old one (an
+      // earlier search's category, e.g. rugs, must not leak into "replace this").
+      const pieceWords = (it.replaceTarget ?? '').toLowerCase();
+      const said = matchCategory(pieceWords ? text.toLowerCase().replace(pieceWords, ' ') : text.toLowerCase());
+      const asked = browse?.filters.category;
+      const category = said ?? (asked && piece.choices.includes(asked) ? asked : piece.category);
+      if (!category) parts.push(`What should replace your ${name}? Say something like “replace it with a bookshelf”.`);
+      else {
+        const { products } = await replacementCandidates(s, piece, { ...(browse?.filters ?? {}), category }, 12);
+        if (!products.length) parts.push(`I couldn't find a ${categoryDef(category).label.toLowerCase()} like that${config.demo3dOnly ? ' with a real 3D model' : ''}. Try fewer details?`);
+        else {
+          setPiece(id, piece.id, { state: 'replace', replacementId: products[0].id, ...(category !== piece.category ? { category } : {}) });
+          replace = { pieceId: piece.id, category, productIds: products.map((p) => p.id), products };
+          parts.push(`Here's ${short(products[0])} in place of your ${name}${products[0].priceText ? `, ${products[0].priceText}` : ''}.${products.length > 1 ? ` Flick the stick for ${products.length - 1} more.` : ''}`);
+        }
+      }
+    }
+  }
+
   let target = it.target ?? pick;
   if (target && !getProduct(target.id)) upsertProduct({ ...target });
   target = target ? getProduct(target.id) ?? target : undefined;
@@ -307,6 +340,8 @@ export async function sessionAsk(id: string, text: string, opts: { via?: 'voice'
     const q = buildQuote(getSession(id)!);
     parts.push(!q.groups.length ? 'Your cart is empty. Add a few pieces first.'
       : `That’s $${q.total.toLocaleString('en-US', { maximumFractionDigits: 2 })} from ${q.groups.length} store${q.groups.length === 1 ? '' : 's'}${q.budget ? ` against your $${q.budget.toLocaleString('en-US')} budget` : ''}.${q.overBy > 0 ? ` You’re $${Math.round(q.overBy).toLocaleString('en-US')} over; I found cheaper swaps.` : ''} Approve it with Visa and I’ll check out at every store.`);
+  } else if (it.action === 'replace') {
+    // handled above
   } else if (it.action !== 'none' && !target) {
     parts.push('Which one? Say “the second one”, or open it first.');
   } else if (target && it.action === 'open') {
@@ -324,5 +359,5 @@ export async function sessionAsk(id: string, text: string, opts: { via?: 'voice'
   // Warm up the free 3D model (IKEA official / stand-in) as soon as the user singles an item out.
   if (target && (it.action === 'place' || it.action === 'open')) ensureModel(target.id, { allowGenerate: false });
   log.info('assistant', `${id} "${text}" -> ${JSON.stringify(browse?.filters ?? {})} q=${it.question} a=${it.action} (${it.source})`);
-  return { transcript: text, reply, action: it.action, productId: target?.id, atPointer: it.atPointer, browse };
+  return { transcript: text, reply, action: it.action, productId: target?.id, atPointer: it.atPointer, browse, replace };
 }

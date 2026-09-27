@@ -1,4 +1,5 @@
 import { categoryDef } from './catalog.js';
+import { labelName } from './realPose.js';
 import type { Dims, Placement, RoomGeometry, Vec3 } from './types.js';
 
 // "Design my room": deterministic interior-layout solver.
@@ -10,10 +11,32 @@ import type { Dims, Placement, RoomGeometry, Vec3 } from './types.js';
 
 export interface LayoutItem { productId: string; category: string; dims: Dims; anchor?: string; near?: string }
 
+/** An item that must stay where it is (a replacement standing in a real piece's spot); the rest arranges around it. */
+export interface FixedPlacement { productId: string; position: Vec3; yawDeg: number; reason?: string }
+
+export interface LayoutOptions {
+  fixed?: FixedPlacement[];
+  /** Real pieces (Space Setup ids) the user is replacing: no longer obstacles or anchors. */
+  skipObjectIds?: Iterable<string>;
+}
+
 type V2 = { x: number; z: number };
 interface Obb { c: V2; hw: number; hd: number; yaw: number }
 interface Placed { item: LayoutItem; pos: V2; yaw: number; y: number; obb: Obb }
 interface Wall { c: V2; n: V2; t: V2; width: number; hasDoor: boolean; hasWindow: boolean }
+
+// What can stand on top of what (mirrors StackRules in unity/.../Furniture/Stacking.cs): table lamps and small plants
+// go on flat tops; lamps not on benches or up on tall shelves.
+const TOPS = ['coffee_table', 'side_table', 'dining_table', 'desk', 'nightstand', 'dresser', 'cabinet', 'tv_stand', 'bookshelf', 'bench'];
+const REAL_TOPS = /^(TABLE|DESK|STORAGE|SHELF)/i;
+export function stackable(category: string, d: Dims): boolean {
+  return category === 'table_lamp' || (category === 'plant' && d.h <= 0.9 && Math.max(d.w, d.d) <= 0.7);
+}
+export function allowedOnTop(category: string, d: Dims, topCategory: string | null, topHeight: number): boolean {
+  if (!stackable(category, d)) return false;
+  return category === 'table_lamp' ? topCategory !== 'bench' && topHeight <= 1.3 : topHeight <= 2.2;
+}
+const fitsTop = (d: Dims, w: number, depth: number) => Math.max(d.w, d.d) <= Math.max(w, depth) - 0.03 && Math.min(d.w, d.d) <= Math.min(w, depth) - 0.03;
 
 const ORDER = ['bed', 'sofa', 'desk', 'dining_table', 'tv_stand', 'dresser', 'bookshelf', 'cabinet', 'coffee_table', 'rug', 'armchair', 'side_table', 'nightstand', 'office_chair', 'dining_chair', 'floor_lamp', 'table_lamp', 'ottoman', 'bench', 'plant', 'mirror', 'wall_art'];
 const GAP = 0.03;
@@ -53,11 +76,13 @@ function inPolygon(p: V2, poly: V2[]): boolean {
   return inside;
 }
 
-export function solveLayout(geo: RoomGeometry, items: LayoutItem[]): Placement[] {
+export function solveLayout(geo: RoomGeometry, items: LayoutItem[], opts: LayoutOptions = {}): Placement[] {
+  const skip = new Set(opts.skipObjectIds ?? []);
+  const objects = geo.objects.filter((o) => !o.id || !skip.has(o.id));
   const poly = geo.floorPolygon.map((p) => v(p.x, p.z));
   const centroid = poly.reduce((a, p) => add(a, mul(p, 1 / poly.length)), v(0, 0));
-  const doors = geo.objects.filter((o) => /DOOR/i.test(o.label));
-  const windows = geo.objects.filter((o) => /WINDOW/i.test(o.label));
+  const doors = objects.filter((o) => /DOOR/i.test(o.label));
+  const windows = objects.filter((o) => /WINDOW/i.test(o.label));
   const walls: Wall[] = (geo.walls.length ? geo.walls : wallsFromPolygon(poly)).map((w) => {
     const c = v(w.center.x, w.center.z);
     let n = norm(v(w.normal.x, w.normal.z));
@@ -69,7 +94,7 @@ export function solveLayout(geo: RoomGeometry, items: LayoutItem[]): Placement[]
 
   // Obstacles: existing furniture (Space Setup boxes) + door swing zones.
   const obstacles: Obb[] = [];
-  for (const o of geo.objects) {
+  for (const o of objects) {
     if (/WALL|FLOOR|CEILING|WINDOW|ART|INVISIBLE/i.test(o.label)) continue;
     if (/DOOR/i.test(o.label)) {
       const wall = walls.reduce((best, w) => (Math.abs(dot(sub(v(o.center.x, o.center.z), w.c), w.n)) < Math.abs(dot(sub(v(o.center.x, o.center.z), best.c), best.n)) ? w : best), walls[0]);
@@ -78,11 +103,20 @@ export function solveLayout(geo: RoomGeometry, items: LayoutItem[]): Placement[]
     }
     obstacles.push({ c: v(o.center.x, o.center.z), hw: o.size.x / 2, hd: o.size.z / 2, yaw: (o.yawDeg * Math.PI) / 180 });
   }
-  const existing = (label: RegExp) => geo.objects.find((o) => label.test(o.label));
+  const existing = (label: RegExp) => objects.find((o) => label.test(o.label));
 
   const placed: Placed[] = [];
   const results: Placement[] = [];
-  const sorted = [...items].sort((a, b) => rank(a.category) - rank(b.category));
+  const usedTops = new Set<string>(); // one lamp / plant per top
+  const fixed = new Map((opts.fixed ?? []).map((f) => [f.productId, f]));
+  for (const item of items) {
+    const f = fixed.get(item.productId);
+    if (!f) continue;
+    const pos = v(f.position.x, f.position.z), yaw = (f.yawDeg * Math.PI) / 180;
+    placed.push({ item, pos, yaw, y: Math.max(0, f.position.y - geo.floorY), obb: { c: pos, hw: item.dims.w / 2, hd: item.dims.d / 2, yaw } });
+    results.push({ productId: item.productId, position: { x: round(f.position.x), y: round(f.position.y), z: round(f.position.z) }, yawDeg: deg(yaw), reason: f.reason ?? '' });
+  }
+  const sorted = items.filter((i) => !fixed.has(i.productId)).sort((a, b) => rank(a.category) - rank(b.category));
 
   const fits = (obb: Obb, isRug: boolean) => {
     if (!corners(obb).every((p) => inPolygon(p, poly)) || !inPolygon(obb.c, poly)) return false;
@@ -95,8 +129,24 @@ export function solveLayout(geo: RoomGeometry, items: LayoutItem[]): Placement[]
     const def = categoryDef(item.category);
     const { w, d, h } = item.dims;
     const isRug = item.category === 'rug';
-    const cands: { pos: V2; yaw: number; y?: number; score: number; why: string }[] = [];
-    const push = (pos: V2, yaw: number, score: number, why: string, y?: number) => cands.push({ pos, yaw, score, why, y });
+    const cands: { pos: V2; yaw: number; y?: number; score: number; why: string; top?: string }[] = [];
+    const push = (pos: V2, yaw: number, score: number, why: string, y?: number, top?: string) => cands.push({ pos, yaw, score, why, y, top });
+    // Lamps and small plants on tops: placed pieces first (in order of preference), then the user's own tables / storage.
+    const onTops = (prefer: string[], base: number, realScore: number) => {
+      for (const [i, cat] of prefer.entries()) {
+        for (const surf of placed.filter((p) => p.item.category === cat && !usedTops.has(p.item.productId))) {
+          const topH = surf.y + surf.item.dims.h;
+          if (fitsTop(item.dims, surf.item.dims.w, surf.item.dims.d) && allowedOnTop(item.category, item.dims, cat, topH))
+            push(surf.pos, surf.yaw, base - i * 0.3, `on the ${categoryDef(cat).label.toLowerCase()}`, topH, surf.item.productId);
+        }
+      }
+      for (const o of objects) {
+        if (!REAL_TOPS.test(o.label) || (o.id && usedTops.has(o.id))) continue;
+        const topH = o.center.y + o.size.y / 2 - geo.floorY;
+        if (fitsTop(item.dims, o.size.x, o.size.z) && allowedOnTop(item.category, item.dims, null, topH))
+          push(v(o.center.x, o.center.z), (o.yawDeg * Math.PI) / 180, realScore, `on your ${labelName(o.label)}`, topH, o.id ?? o.label);
+      }
+    };
 
     const wallSlots = (prefer: 'center' | 'ends' | 'any', filter: (wl: Wall) => boolean = () => true, depth = d) => {
       for (const wl of walls) {
@@ -202,17 +252,16 @@ export function solveLayout(geo: RoomGeometry, items: LayoutItem[]): Placement[]
         cornerSlots(poly, centroid, w, d, push, 'lights a dark corner');
         break;
       }
-      case 'table_lamp': {
-        const surf = findPlaced('side_table', 'nightstand', 'desk', 'dresser');
-        if (surf) push(surf.pos, surf.yaw, 6, `on the ${categoryDef(surf.item.category).label.toLowerCase()}`, surf.item.dims.h);
+      case 'table_lamp':
+        onTops(['side_table', 'nightstand', 'desk', 'dresser', 'cabinet', 'tv_stand', 'coffee_table', 'dining_table'], 6, 4.5);
         break;
-      }
       case 'ottoman': {
         const chair = findPlaced('armchair');
         if (chair) push(add(chair.pos, mul(fwd(chair.yaw), chair.item.dims.d / 2 + 0.25 + d / 2)), chair.yaw, 4, 'footrest for the armchair');
         break;
       }
       case 'plant':
+        if (stackable('plant', item.dims)) onTops(['side_table', 'dresser', 'bookshelf', 'cabinet', 'tv_stand', 'desk', 'bench', 'nightstand', 'coffee_table'], 3.5, 3);
         cornerSlots(poly, centroid, w, d, push, 'softens a corner');
         break;
       case 'wall_art': case 'mirror': {
@@ -252,6 +301,7 @@ export function solveLayout(geo: RoomGeometry, items: LayoutItem[]): Placement[]
       chosen = { pos: add(u, mul(f, 1.5)), yaw: yawOf(mul(f, -1)), score: 0, why: '' };
       reason = "didn't fit anywhere without overlapping — placed in front of you";
     }
+    if (chosen.top) usedTops.add(chosen.top);
     const obb = { c: chosen.pos, hw: w / 2, hd: d / 2, yaw: chosen.yaw };
     placed.push({ item, pos: chosen.pos, yaw: chosen.yaw, y: chosen.y ?? 0, obb });
     results.push({

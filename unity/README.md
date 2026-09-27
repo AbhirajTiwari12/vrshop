@@ -82,9 +82,12 @@ Change the backend URL later without rebuilding: set it in the window and click 
 | Input | Action |
 |---|---|
 | Trigger / grip on UI | click |
-| Trigger / grip on furniture + move | select + slide along the floor (wall art slides along walls) |
+| Trigger / grip on furniture + move | select + slide along the floor (wall art slides along walls); your real furniture and walls are solid |
 | Release near a wall | snaps flush to the wall |
 | Right (or left) thumbstick ← → | rotate the selected item |
+| Point at your real furniture (a Space Setup box) + trigger | its card: **Keep** / **Replace** / type / **Adjust** the box |
+| Thumbstick ↑ ↓ on a replaced piece (or its replacement) | try the next / previous replacement |
+| Drag a table lamp or small plant onto a table / dresser / shelf (virtual or real) | it stands on it and moves with it; drag it off the edge to put it back on the floor |
 | **A** | show / hide the catalog in front of you |
 | **B** | delete the selected item |
 | hold **X** | talk to your designer: "a tall plant for this corner under 80 dollars" (point where it should go) |
@@ -94,6 +97,10 @@ Change the backend URL later without rebuilding: set it in the window and click 
 gold and ripples with your voice while listening, turns rose with a spinning brass arc while thinking, and pulses as it
 speaks. Replies are spoken (OpenAI text to speech via the backend, cached in `backend/data/tts`) and captioned in the
 bubble beside it. Without `OPENAI_API_KEY` the captions still appear, just without the voice.
+
+**Your real furniture.** Every Space Setup box is kept by default (solid: nothing virtual ends up inside it) or can be
+replaced: it's painted out of passthrough and a product of the same kind and size stands in its spot ("replace my
+couch with a green velvet sofa" works by voice too). See [docs/REAL_FURNITURE.md](../docs/REAL_FURNITURE.md).
 
 **The showroom (A).** Three tabs: *For you* (the designer's picks for your room, one category chip at a time),
 *Browse* (the whole catalog; filter chips open drop-down menus) and *Bag* (budget + "Buy the room with Visa").

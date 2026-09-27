@@ -6,6 +6,7 @@ using VRShop.Core;
 using VRShop.Furniture;
 using VRShop.Input;
 using VRShop.Interaction;
+using VRShop.Room;
 using VRShop.UI;
 #if UNITY_ANDROID && !UNITY_EDITOR
 using UnityEngine.Android;
@@ -37,6 +38,7 @@ namespace VRShop.Voice
         bool m_Recording, m_TapMode, m_Busy;
         float m_Started;
         Vector3? m_PointedAt;
+        string m_PointedPiece; // a real piece of furniture pointed at while talking ("replace this")
         readonly float[] m_Window = new float[512];
         float m_Noise = 0.01f, m_HeardSpeech, m_Silence;
 
@@ -65,9 +67,13 @@ namespace VRShop.Voice
             if (input.Down(Btn.X)) Begin(false);
             if (!m_Recording) { Level = 0; return; }
 
-            // Remember where the user points while talking ("put it here").
+            // Remember where the user points while talking ("put it here", "replace this").
             foreach (var lp in FindObjectsByType<LaserPointer>(FindObjectsSortMode.None))
-                if (lp.HasHit && LaserPointer.IsFloor(lp.Hit.collider)) m_PointedAt = lp.Hit.point;
+            {
+                if (lp.HasHit && (LaserPointer.IsFloor(lp.Hit.collider) || LaserPointer.IsTopFace(lp.Hit))) m_PointedAt = lp.Hit.point; // floor, or a tabletop
+                if (lp.Hovered is RealPiece rp && rp != null) m_PointedPiece = rp.Id;
+                else if (lp.Hovered is FurnitureItem fi && fi != null && RealFurniture.Instance?.PieceOf(fi) is RealPiece owner) m_PointedPiece = owner.Id;
+            }
 
             var rms = MicRms();
             Level = Mathf.Lerp(Level, Mathf.Clamp01(rms * 9f), 1 - Mathf.Exp(-Time.deltaTime * 20));
@@ -108,6 +114,8 @@ namespace VRShop.Voice
             m_TapMode = tapMode;
             m_Started = Time.time;
             m_PointedAt = null;
+            // A piece whose card is open counts as "this" too.
+            m_PointedPiece = RealFurniture.Instance != null && RealFurniture.Instance.Selected != null ? RealFurniture.Instance.Selected.Id : null;
             m_Noise = 0.01f;
             m_HeardSpeech = m_Silence = 0;
             Orb?.Listen(tapMode);
@@ -145,7 +153,7 @@ namespace VRShop.Voice
             try
             {
                 // "How much is this one?" refers to the product open in the catalog's detail view.
-                var res = await app.Api.Voice(app.Session.id, wav, CatalogPanel.Instance?.FocusedProductId);
+                var res = await app.Api.Voice(app.Session.id, wav, CatalogPanel.Instance?.FocusedProductId, m_PointedPiece);
                 if (!string.IsNullOrEmpty(res.error)) { Orb?.Fail(res.error); return; }
                 if (string.IsNullOrEmpty(res.transcript)) { Orb?.Notify("Sorry, I didn't catch that. Try again?"); return; }
                 Orb?.Respond(res.transcript, res.reply, res.speechUrl);
@@ -163,6 +171,10 @@ namespace VRShop.Voice
                         break;
                     case "checkout":
                         CatalogPanel.Instance?.ShowVisa(); // the user still approves with one press
+                        break;
+                    case "replace":
+                        // The real piece is painted out and the first match stands in its spot; ↑↓ tries the others.
+                        if (res.replace != null) { RealFurniture.Instance?.ApplyVoiceReplace(res.replace); CatalogPanel.Instance?.Hide(); }
                         break;
                     case "add_to_cart":
                     case "remove_from_cart":

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { config, DATA_DIR } from '../config.js';
 import { isAccessory, matchCategory } from '../catalog.js';
 import { MATERIAL_FAMILY, extractAttributes } from './attributes.js';
-import type { BrowseResult, Facet, Filters, Product } from '../types.js';
+import type { BrowseResult, Dims, Facet, Filters, Product } from '../types.js';
 
 // The pulled catalog: thousands of real listings fetched once (npm run catalog:pull) and filtered locally for free.
 // Voice / typed / manual filters query this; live store searches only top it up when it has too few matches, and
@@ -110,6 +110,15 @@ export function addProducts(products: Product[], hintCategory: string | undefine
   }
   saveInventory();
   return { added, kept };
+}
+
+/** Store measured dimensions (e.g. from the IKEA product page) so they're never fetched twice. */
+export function setListingDims(id: string, dims: Dims) {
+  const p = db().products[id];
+  if (!p || p.dims) return;
+  p.dims = dims;
+  p.dimsSource = 'listing';
+  saveInventory();
 }
 
 export function setOfficialModel(id: string, has: boolean) {

@@ -187,11 +187,29 @@ export interface RoomGeometry {
   ceilingHeight: number;
   floorPolygon: { x: number; z: number }[];
   walls: { center: Vec3; normal: Vec3; width: number; height: number }[];
-  objects: { label: string; center: Vec3; size: Vec3; yawDeg: number }[];
+  objects: RoomObject[];
   user?: { position: Vec3; forward: Vec3 };
 }
 
 export interface Vec3 { x: number; y: number; z: number }
+
+/** A Space Setup box (furniture) or plane (door / window). `id` is the headset's anchor id, stable across sessions. */
+export interface RoomObject { id?: string; label: string; center: Vec3; size: Vec3; yawDeg: number }
+
+/**
+ * One piece of the user's real furniture (a Space Setup box) and what they want to do with it. Kept pieces are solid:
+ * new furniture never overlaps them. Replaced pieces are painted out in the headset and a product stands in their spot.
+ */
+export interface RealPiece {
+  id: string;                      // Space Setup anchor id (RoomObject.id)
+  label: string;                   // COUCH, TABLE, STORAGE, BED, LAMP, PLANT, SCREEN, OTHER
+  category: string | null;         // our furniture type for it (null = unknown until the user picks one)
+  categorySource: 'auto' | 'user';
+  choices: string[];               // furniture types that make sense for this label (type picker)
+  state: 'keep' | 'replace';
+  replacementId?: string;          // product currently standing in for it
+  updatedAt: number;
+}
 
 export interface Placement { productId: string; position: Vec3; yawDeg: number; reason?: string }
 
@@ -220,4 +238,5 @@ export interface Session {
   checkout?: Checkout;            // latest agentic checkout ("buy the room")
   splits?: SplitLink[];           // Visa Pay by Link requests sent to roommates
   pastCheckouts?: Checkout[];
+  realFurniture?: Record<string, RealPiece>; // the user's real furniture by Space Setup anchor id (keep / replace)
 }

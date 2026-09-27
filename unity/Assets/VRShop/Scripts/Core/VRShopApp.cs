@@ -71,6 +71,7 @@ namespace VRShop.Core
             Add<PassthroughController>("Passthrough");
             Add<ManipulationController>("Manipulation");
             Add<FurnitureManager>("Furniture");
+            Add<RealFurniture>("RealFurniture");
             Add<Toast>("Toast");
             Add<AssistantOrb>("Assistant");
             Add<CatalogPanel>("Catalog");
@@ -217,6 +218,8 @@ namespace VRShop.Core
             Session.products[p.id] = p;
         }
 
+        static string Join(List<string> words) => words.Count <= 1 ? string.Concat(words) : string.Join(", ", words.Take(words.Count - 1)) + " and " + words.Last();
+
         /// <summary>The designer introduces itself once per launch.</summary>
         void Greet()
         {
@@ -227,6 +230,13 @@ namespace VRShop.Core
                 ? "Welcome in. I'm curating pieces for your room — it only takes a moment. Tell me what you're looking for anytime."
                 : $"Welcome in. I've pulled pieces that suit your {room}. Tell me what you're looking for.";
             AssistantOrb.Instance.Say(line, "Hold X, or point at me and pull the trigger");
+        }
+
+        /// <summary>Upload the room again (the user adjusted a real piece's box, or the server hasn't seen it yet).</summary>
+        public Task ResendGeometry()
+        {
+            m_GeometrySent = false;
+            return SendGeometry();
         }
 
         async Task SendGeometry()
@@ -244,9 +254,12 @@ namespace VRShop.Core
         public async void DesignMyRoom()
         {
             if (Session == null) return;
+            // Real furniture the user keeps is part of the design: don't suggest a second sofa next to their couch.
+            var real = RealFurniture.Instance;
+            var kept = real != null ? real.CoveredCategories() : new HashSet<string>();
             var ids = Session.cart != null && Session.cart.Count > 0
                 ? Session.cart.Select(c => c.productId).ToList()
-                : Session.categories.Where(c => c.origin == "analysis" && c.productIds.Count > 0)
+                : Session.categories.Where(c => c.origin == "analysis" && c.productIds.Count > 0 && !kept.Contains(c.category))
                     .Select(c => c.productIds.FirstOrDefault(id => Session.GetProduct(id)?.model?.kind == "official") ?? c.productIds[0])
                     .Take(7).ToList();
             // Include what is already placed so the layout accounts for it.
@@ -262,11 +275,14 @@ namespace VRShop.Core
                 await SendGeometry();
                 var head = XRInput.Instance.Head;
                 var user = new UserDto { position = new Vec3(head.position), forward = new Vec3(Vector3.ProjectOnPlane(head.forward, Vector3.up).normalized) };
-                var res = await Api.Layout(Session.id, ids, user);
+                // Replacements stay in their real piece's spot; everything else arranges around them.
+                var res = await Api.Layout(Session.id, ids, user, real != null ? real.FixedPlacements() : null);
                 FurnitureManager.Instance.ApplyLayout(res.placements, Session);
                 var n = res.placements.Count;
-                var why = res.placements.Select(p => p.reason).FirstOrDefault(r => !string.IsNullOrEmpty(r));
+                var why = res.placements.Select(p => p.reason).FirstOrDefault(r => !string.IsNullOrEmpty(r) && !r.StartsWith("in place of"));
                 var line = $"Here's a first layout: {n} piece{(n == 1 ? "" : "s")}, arranged around your space.";
+                var keptNames = real != null ? real.KeptNames() : new List<string>();
+                if (keptNames.Count > 0) line += $" I kept your {Join(keptNames)} and designed around {(keptNames.Count == 1 ? "it" : "them")}.";
                 if (!string.IsNullOrEmpty(why)) line += $" {char.ToUpper(why[0])}{why.Substring(1).TrimEnd('.')}.";
                 if (res.usedDefaultRoom) line += " I used a standard room — run Space Setup on the headset so I can use yours.";
                 if (orb != null) orb.Say(line);

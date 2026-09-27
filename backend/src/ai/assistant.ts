@@ -11,7 +11,7 @@ import { chatJson, hasOpenAI } from './openai.js';
 
 export const QUESTIONS = ['none', 'cheapest', 'most_expensive', 'price_range', 'average_price', 'count', 'best_rated', 'budget_left'] as const;
 export type Question = (typeof QUESTIONS)[number];
-export const ACTIONS = ['none', 'open', 'add_to_cart', 'remove_from_cart', 'place', 'checkout'] as const;
+export const ACTIONS = ['none', 'open', 'add_to_cart', 'remove_from_cart', 'place', 'checkout', 'replace'] as const;
 export type Action = (typeof ACTIONS)[number];
 
 export interface AssistantContext {
@@ -25,6 +25,7 @@ export interface AssistantContext {
   cartTotal: number;
   chat: ChatTurn[];
   stores: string[];                // store names in the catalog, so "from Wayfair" maps to a real value
+  realFurniture: string[];         // the user's own furniture from the room scan ("couch (sofa)"), for "replace my couch"
 }
 
 export interface Interpretation {
@@ -33,6 +34,7 @@ export interface Interpretation {
   action: Action;
   target?: Product;                // product the question/action refers to
   atPointer: boolean;              // "put it here" while pointing
+  replaceTarget?: string;          // action replace: the words naming their real piece ("couch", "this")
   reply: string;
   source: 'openai' | 'heuristic';
 }
@@ -63,6 +65,7 @@ const SCHEMA = obj({
   action: { type: 'string', enum: ACTIONS },
   target: { type: 'integer' },
   atPointer: { type: 'boolean' },
+  replaceTarget: str,
   reply: str,
 });
 
@@ -85,7 +88,9 @@ cheapest, most_expensive, price_range, average_price, count, best_rated, budget_
 target: 1-based number of the listed item the user refers to ("the second one" = 2, "the black one" = the matching item). 0 = the focused item or none. -1 if nothing specific.
 For "the cheapest / most expensive / best rated one" set question accordingly and target -1: the app picks that item from the real results.
 action: open (details), add_to_cart ("add it", "I'll take it"), remove_from_cart, place ("show it in my room", "put it here"),
-checkout ("buy the room", "check out", "buy everything in my cart" — the app then asks the user to approve the payment; never claim it's paid), or none.
+checkout ("buy the room", "check out", "buy everything in my cart" — the app then asks the user to approve the payment; never claim it's paid),
+replace (swap one of the user's OWN real pieces of furniture for a product: "replace my couch with a green velvet sofa", "swap this table for something round", "what would a leather sofa look like instead of my couch"), or none.
+replaceTarget: for action replace, the words naming their real piece ("couch", "coffee table", "this"); otherwise "". For replace, the filters describe the NEW product (category = what it becomes; keep the piece's kind unless they name another).
 atPointer: true if they refer to a spot ("here", "in this corner", "next to the couch").
 
 reply: what you say out loud, in the voice of a warm, confident boutique designer: one short natural sentence (max 20 words), no lists, no emoji, no markdown. When the turn only changes filters or asks an aggregate question, the app already says "Found N ..." and the numbers, so either add one brief styling thought that ties the pick to their room ("Walnut would warm up those pale floors.") or return "" — never repeat what you're searching for. Never say how many results there are or quote aggregate prices. You MAY answer questions about a specific listed item using its data (price, size, store); never invent materials or features that aren't in the data. If the request isn't about shopping, answer briefly and keep the filters.`;
@@ -102,6 +107,7 @@ export async function interpret(text: string, ctx: AssistantContext): Promise<In
       ctx.room ? `Room: ${ctx.room.roomType}, style ${ctx.room.styleTags.join(', ')}` : '',
       `Budget: ${ctx.budget ? `$${ctx.budget}` : 'none'}; cart so far $${ctx.cartTotal}`,
       `Stores in the catalog: ${ctx.stores.slice(0, 25).join(', ')}`,
+      ctx.realFurniture.length ? `Their real furniture (from the room scan): ${ctx.realFurniture.join('; ')}` : 'Their real furniture: not scanned',
     ].filter(Boolean).join('\n');
     const history = ctx.chat.slice(-6).map((t) => ({ role: t.role, content: t.text }) as const);
     const r = await chatJson<any>({
@@ -119,6 +125,7 @@ export async function interpret(text: string, ctx: AssistantContext): Promise<In
       action: ACTIONS.includes(r.action) ? r.action : 'none',
       target: pickTarget(r.target, ctx),
       atPointer: !!r.atPointer,
+      replaceTarget: String(r.replaceTarget ?? '').trim() || undefined,
       reply: String(r.reply ?? '').trim(),
       source: 'openai',
     };
@@ -186,7 +193,8 @@ export function heuristicInterpret(text: string, ctx: AssistantContext): Interpr
 
   const ord = Object.entries(ORDINALS).find(([w]) => new RegExp(`\\b${w}\\b`).test(t));
   const target = ord ? (ord[1] === -1 ? ctx.visible[ctx.visible.length - 1] : ctx.visible[ord[1] - 1]) : /\b(this|that|it)\b/.test(t) ? ctx.focused : undefined;
-  const action: Action =
+  const replaceMatch = t.match(/\b(?:replace|swap(?: out)?)\s+(?:(?:my|the|this|that|our)\s+)?([a-z ]*?)\s*(?:\b(?:with|for)\b|$)/) ?? t.match(/\binstead of (?:my|the|this|that|our)?\s*([a-z ]+)/);
+  const action: Action = replaceMatch ? 'replace' :
     /\b(check ?out|buy (it all|everything|the (whole )?room|my cart)|place (the|my) order|pay for (it all|everything))\b/.test(t) ? 'checkout'
       : /\b(add|put)\b.*\bcart\b|\bi'?ll take\b|\bbuy\b/.test(t) ? 'add_to_cart'
       : /\bremove\b.*\bcart\b/.test(t) ? 'remove_from_cart'
@@ -197,7 +205,8 @@ export function heuristicInterpret(text: string, ctx: AssistantContext): Interpr
   let reply = '';
   if (target && /\bhow much\b/.test(t)) reply = `${target.title} is ${target.priceText || 'not priced'} at ${target.store}.`;
   else if (JSON.stringify(filters) === JSON.stringify(normalizeFilters(ctx.filters)) && question === 'none' && action === 'none' && !reset) reply = `Try something like “a black leather sofa under $1,000”.`;
-  return { filters, question, action, target, atPointer: /\b(here|there|this corner|that corner)\b/.test(t), reply, source: 'heuristic' };
+  const replaceTarget = replaceMatch ? (replaceMatch[1] || 'this').trim() : undefined;
+  return { filters, question, action, target, atPointer: /\b(here|there|this corner|that corner)\b/.test(t), replaceTarget, reply, source: 'heuristic' };
 }
 
 // ------------------------------------------------------------------------------------------ answers from data

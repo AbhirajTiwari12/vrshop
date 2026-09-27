@@ -231,6 +231,7 @@ namespace VRShop.EditorTools
             EnsureDir(MaterialsDir);
             SaveMaterial(MaterialsDir, "ShadowCatcher", Shader.Find("VRShop/ShadowCatcher"));
             SaveMaterial(MaterialsDir, "DepthOccluder", Shader.Find("VRShop/DepthOccluder"));
+            SaveMaterial(MaterialsDir, "RoomCover", Shader.Find("VRShop/RoomCover"));
             SaveMaterial(MaterialsDir, "BlobShadow", Shader.Find("VRShop/BlobShadow"));
             SaveMaterial(MaterialsDir, "UnlitTransparent", Shader.Find("VRShop/UnlitTransparent"));
             SaveMaterial(MaterialsDir, "UnlitColor", Shader.Find("Universal Render Pipeline/Unlit"));

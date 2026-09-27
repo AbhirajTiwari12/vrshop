@@ -141,6 +141,8 @@ namespace VRShop.EditorTools
         public static BuildReport BuildApk(bool run)
         {
             if (!File.Exists(SceneBuilder.ScenePath)) { Debug.LogError("[VRShop] Build the scene first (step 3)."); return null; }
+            // Runtime materials keep their shaders in the build; refresh them so newly added shaders are included.
+            ProjectConfigurator.CreateRuntimeMaterials();
             Directory.CreateDirectory("Builds");
             var options = new BuildPlayerOptions
             {

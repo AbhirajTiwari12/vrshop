@@ -10,7 +10,7 @@ import { inventoryProduct, inventoryStats } from './inventory/inventory.js';
 import { pullCatalog, pullStatus, planShoppingQueries, type PullTier } from './inventory/pull.js';
 import { liveSearchBudgetLeft, shoppingCallsThisMonth } from './inventory/usage.js';
 import { COLORS, MATERIALS, STYLES } from './inventory/attributes.js';
-import { CATEGORIES } from './catalog.js';
+import { CATEGORIES, normalizeCategory } from './catalog.js';
 import { retailerRouter } from './pay/retailer.js';
 import { splitWithRoommate, startCheckout, tamperDemo, TAMPER_MODES, voidOrder, type TamperMode } from './pay/agent.js';
 import { findMandate, vicInstruction } from './pay/mandate.js';
@@ -18,7 +18,9 @@ import { buildQuote } from './pay/quote.js';
 import { keyDirectory } from './pay/tap.js';
 import { visaStatus } from './pay/visa.js';
 import { ensureModel, modelFile } from './models/pipeline.js';
-import { solveLayout, defaultGeometry, type LayoutItem } from './layout.js';
+import { solveLayout, defaultGeometry, type FixedPlacement, type LayoutItem } from './layout.js';
+import { replacementCandidates, setPiece, syncPieces, warmCandidates } from './realFurniture.js';
+import { labelName, replacementPose } from './realPose.js';
 import { categoryDef } from './catalog.js';
 import { transcribe, hasOpenAI } from './ai/openai.js';
 import { speechAudio, speechUrl } from './ai/speech.js';
@@ -119,7 +121,8 @@ app.post('/api/sessions/:id/voice', audioUpload.single('audio'), async (req, res
   }
   if (!transcript) return void res.json({ transcript: '', reply: "Sorry, I didn't catch that." });
   const focus = String(req.body?.focusProductId ?? '') || undefined;
-  const r = await sessionAsk(String(req.params.id), transcript, { via: 'voice', focusProductId: focus });
+  const pieceId = String(req.body?.pieceId ?? '') || undefined; // the real piece the user pointed at while talking
+  const r = await sessionAsk(String(req.params.id), transcript, { via: 'voice', focusProductId: focus, pieceId });
   res.json({ ...r, speechUrl: speechUrl(r.reply), session: expandSession(getSession(String(req.params.id))!) });
 });
 
@@ -129,7 +132,8 @@ app.post('/api/sessions/:id/ask', async (req, res) => {
   const text = String(req.body?.text ?? '').trim().slice(0, 500);
   if (!text) return void res.status(400).json({ error: 'text required' });
   const focus = String(req.body?.focusProductId ?? '') || undefined;
-  const r = await sessionAsk(String(req.params.id), text, { via: 'text', focusProductId: focus });
+  const pieceId = String(req.body?.pieceId ?? '') || undefined;
+  const r = await sessionAsk(String(req.params.id), text, { via: 'text', focusProductId: focus, pieceId });
   res.json({ ...r, speechUrl: req.body?.speak ? speechUrl(r.reply) : undefined, session: expandSession(getSession(String(req.params.id))!) });
 });
 
@@ -171,7 +175,9 @@ app.post('/api/sessions/:id/geometry', (req, res) => {
   const s = need(getSession(String(req.params.id)), 'Session');
   const g = req.body as RoomGeometry;
   if (!Array.isArray(g?.floorPolygon)) return void res.status(400).json({ error: 'floorPolygon required' });
-  saveSession({ ...s, geometry: g });
+  const realFurniture = syncPieces(s.realFurniture, g);
+  saveSession({ ...s, geometry: g, realFurniture });
+  warmCandidates(getSession(s.id)!);
   const xs = g.floorPolygon.map((p) => p.x), zs = g.floorPolygon.map((p) => p.z);
   log.info('geometry', `${s.id}: ${g.walls?.length ?? 0} walls, ${g.objects?.length ?? 0} objects, ~${(Math.max(...xs) - Math.min(...xs)).toFixed(1)} x ${(Math.max(...zs) - Math.min(...zs)).toFixed(1)} m`);
   res.json({ ok: true });
@@ -189,7 +195,20 @@ app.post('/api/sessions/:id/layout', (req, res) => {
       const cat = s.categories.find((c) => c.productIds.includes(p.id));
       return { productId: p.id, category: p.category, dims: p.dims ?? categoryDef(p.category).dims, anchor: cat?.placement.anchor, near: cat?.placement.near };
     });
-  const placements = solveLayout(geo, items);
+  // Replacements stand in their real piece's spot (the headset sends where they are now); the rest arranges around them.
+  const replaced = Object.values(s.realFurniture ?? {}).filter((p) => p.state === 'replace');
+  const fixed: FixedPlacement[] = (Array.isArray(req.body?.fixed) ? req.body.fixed : [])
+    .filter((f: any) => typeof f?.productId === 'string' && ids.includes(f.productId) && Number.isFinite(f?.position?.x) && Number.isFinite(f?.position?.z) && Number.isFinite(f?.yawDeg));
+  const floor = geo.floorPolygon.length ? geo.floorPolygon : [{ x: 0, z: 0 }];
+  const centroid = { x: floor.reduce((a, p) => a + p.x, 0) / floor.length, z: floor.reduce((a, p) => a + p.z, 0) / floor.length };
+  for (const piece of replaced) {
+    const box = geo.objects.find((o) => o.id === piece.id);
+    const p = piece.replacementId ? getProduct(piece.replacementId) : undefined;
+    if (!box || !p || !ids.includes(p.id) || fixed.some((f) => f.productId === p.id)) continue;
+    const pose = replacementPose(box, p.dims ?? categoryDef(p.category).dims, geo.walls, geo.floorY, centroid);
+    fixed.push({ productId: p.id, position: pose.position, yawDeg: pose.yawDeg, reason: `in place of your ${labelName(piece.label)}` });
+  }
+  const placements = solveLayout(geo, items, { fixed, skipObjectIds: replaced.map((p) => p.id) });
   saveSession({ ...s, placements });
   res.json({ placements, usedDefaultRoom: !s.geometry });
 });
@@ -199,6 +218,27 @@ app.put('/api/sessions/:id/placements', (req, res) => {
   const placements: Placement[] = Array.isArray(req.body?.placements) ? req.body.placements : [];
   saveSession({ ...s, placements });
   res.json({ ok: true });
+});
+
+// The user's real furniture: keep (solid; new pieces never overlap it) or replace (painted out, a product in its spot).
+app.put('/api/sessions/:id/real/:pieceId', (req, res) => {
+  const b = req.body ?? {};
+  const s = setPiece(String(req.params.id), String(req.params.pieceId), {
+    state: b.state,
+    category: typeof b.category === 'string' && b.category ? normalizeCategory(b.category) : undefined,
+    replacementId: b.replacementId === null || b.clearReplacement === true ? null : typeof b.replacementId === 'string' ? b.replacementId : undefined,
+  });
+  res.json(expandSession(s));
+});
+
+// Products that could stand in for a real piece: same type (or ?category=), sized like it, style-ranked, 3D warmed up.
+app.get('/api/sessions/:id/real/:pieceId/candidates', async (req, res) => {
+  const s = need(getSession(String(req.params.id)), 'Session');
+  const piece = need(s.realFurniture?.[String(req.params.pieceId)], 'Piece');
+  const category = typeof req.query.category === 'string' && req.query.category ? normalizeCategory(req.query.category) : undefined;
+  const limit = Math.max(1, Math.min(24, Number(req.query.limit) || 12));
+  const r = await replacementCandidates(s, piece, category ? { category } : {}, limit);
+  res.json({ pieceId: piece.id, category: r.category, products: r.products });
 });
 
 app.post('/api/sessions/:id/cart', (req, res) => {

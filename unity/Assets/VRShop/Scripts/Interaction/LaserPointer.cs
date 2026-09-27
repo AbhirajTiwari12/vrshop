@@ -27,6 +27,9 @@ namespace VRShop.Interaction
         /// <summary>Last point on the floor the user pointed at (used for "put a lamp here").</summary>
         public Vector3? LastFloorPoint { get; private set; }
         public float LastFloorPointTime { get; private set; }
+        /// <summary>Last point on a furniture top (placed or real) the user pointed at ("put a lamp on this table").</summary>
+        public Vector3? LastTopPoint { get; private set; }
+        public float LastTopPointTime { get; private set; }
 
         public static event Action<LaserPointer, RaycastHit> FloorClicked;
 
@@ -99,6 +102,11 @@ namespace VRShop.Interaction
                 LastFloorPoint = best.point;
                 LastFloorPointTime = Time.time;
             }
+            else if (found && IsTopFace(best))
+            {
+                LastTopPoint = best.point;
+                LastTopPointTime = Time.time;
+            }
 
             var ev = new PointerEvent { hand = hand, ray = ray, hit = best };
             if (!ReferenceEquals(target, Hovered))
@@ -149,6 +157,10 @@ namespace VRShop.Interaction
         }
 
         public static bool IsFloor(Collider c) => c.TryGetComponent<RoomSurface>(out var s) && s.kind == SurfaceKind.Floor;
+
+        /// <summary>The upper face of a piece of furniture (virtual, or a real Space Setup box).</summary>
+        public static bool IsTopFace(RaycastHit h) =>
+            h.normal.y > 0.7f && (h.collider.GetComponentInParent<Furniture.FurnitureItem>() != null || h.collider.GetComponent<Room.RealPiece>() != null);
 
         void SetVisible(bool v)
         {

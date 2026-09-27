@@ -19,6 +19,7 @@ namespace VRShop.Room
 
     public class ObjectInfo
     {
+        public string id;        // Space Setup anchor id (stable across sessions); "LABEL_n" when the anchor has none
         public string label;     // COUCH, TABLE, BED, STORAGE, SCREEN, LAMP, PLANT, OTHER, DOOR_FRAME, WINDOW_FRAME
         public Vector3 center;   // world
         public Vector3 size;     // x = width, y = height, z = depth (in the object's yaw frame)
@@ -33,10 +34,12 @@ namespace VRShop.Room
     /// 4 x 4.5 m default room in front of the user.
     ///
     /// From that it builds:
-    ///  - colliders for the laser (floor, walls, real furniture)
-    ///  - depth-only occluders so virtual furniture hides behind real walls/furniture (MR mode)
+    ///  - colliders for the laser (floor, walls)
+    ///  - depth-only occluders so virtual furniture hides behind real walls (MR mode)
     ///  - a shadow-catcher floor so virtual furniture casts shadows on the real floor (MR mode)
-    ///  - a full-color "virtual room" (walls painted with the room's palette, wood floor) for VR mode
+    ///  - a full-color "virtual room" (walls painted with the room's palette, wood floor) for Editor preview
+    /// The user's real furniture (Space Setup boxes) is handled by RealFurniture: one RealPiece per box, which owns its
+    /// collider, occluder, keep/replace state and the painted-out cover.
     /// </summary>
     public class RoomService : MonoBehaviour
     {
@@ -125,15 +128,20 @@ namespace VRShop.Room
                 Walls.Add(new WallInfo { center = center, normal = n, width = rect.width, height = rect.height });
             }
 
+            var anchorIndex = 0;
             foreach (var a in room.Anchors)
             {
                 var label = a.Label.ToString();
+                var uuid = a.Anchor.Uuid;
+                var id = uuid != Guid.Empty ? uuid.ToString() : $"{label.Split(',')[0].Trim()}_{anchorIndex}";
+                anchorIndex++;
                 if (a.HasAnyLabel(MRUKAnchor.SceneLabels.DOOR_FRAME | MRUKAnchor.SceneLabels.WINDOW_FRAME) && a.PlaneRect.HasValue)
                 {
                     var r = a.PlaneRect.Value;
                     var n = Vector3.ProjectOnPlane(a.transform.forward, Vector3.up).normalized;
                     Objects.Add(new ObjectInfo
                     {
+                        id = id,
                         label = a.HasAnyLabel(MRUKAnchor.SceneLabels.DOOR_FRAME) ? "DOOR_FRAME" : "WINDOW_FRAME",
                         center = a.transform.TransformPoint(new Vector3(r.center.x, r.center.y, 0)),
                         size = new Vector3(r.width, r.height, 0.05f),
@@ -143,7 +151,9 @@ namespace VRShop.Room
                 }
                 if (!a.VolumeBounds.HasValue) continue;
                 if (a.HasAnyLabel(MRUKAnchor.SceneLabels.WALL_FACE | MRUKAnchor.SceneLabels.FLOOR | MRUKAnchor.SceneLabels.CEILING | MRUKAnchor.SceneLabels.GLOBAL_MESH)) continue;
-                Objects.Add(VolumeToObject(label, a.transform, a.VolumeBounds.Value));
+                var o = VolumeToObject(label, a.transform, a.VolumeBounds.Value);
+                o.id = id;
+                Objects.Add(o);
             }
         }
 
@@ -247,7 +257,14 @@ namespace VRShop.Room
                 ceilingHeight = CeilingHeight,
                 floorPolygon = Outline.Select(p => new XZ { x = p.x, z = p.z }).ToList(),
                 walls = Walls.Select(w => new WallDto { center = new Vec3(w.center), normal = new Vec3(w.normal), width = w.width, height = w.height }).ToList(),
-                objects = Objects.Select(o => new ObjectDto { label = o.label, center = new Vec3(o.center), size = new Vec3(o.size), yawDeg = o.yawDeg }).ToList(),
+                objects = Objects.Select(o =>
+                {
+                    // Real furniture as the user sees it: with their box adjustments (RealFurniture), else as scanned.
+                    var piece = RealFurniture.Instance != null ? RealFurniture.Instance.Find(o.id) : null;
+                    return piece != null
+                        ? new ObjectDto { id = o.id, label = o.label, center = new Vec3(piece.Center), size = new Vec3(piece.Size), yawDeg = piece.Yaw }
+                        : new ObjectDto { id = o.id, label = o.label, center = new Vec3(o.center), size = new Vec3(o.size), yawDeg = o.yawDeg };
+                }).ToList(),
                 user = new UserDto { position = new Vec3(head.position), forward = new Vec3(Vector3.ProjectOnPlane(head.forward, Vector3.up).normalized) },
             };
         }
@@ -283,16 +300,6 @@ namespace VRShop.Room
                 rs.kind = SurfaceKind.Wall;
                 rs.label = "WALL";
             }
-            foreach (var o in Objects.Where(o => !o.isOpening))
-            {
-                var go = new GameObject($"Object_{o.label}");
-                go.transform.SetParent(root, false);
-                go.transform.SetPositionAndRotation(o.center, Quaternion.Euler(0, o.yawDeg, 0));
-                go.AddComponent<BoxCollider>().size = o.size;
-                var rs = go.AddComponent<RoomSurface>();
-                rs.kind = SurfaceKind.Object;
-                rs.label = o.label;
-            }
         }
 
         void BuildMixedRealityHelpers()
@@ -321,38 +328,9 @@ namespace VRShop.Room
                 q.transform.localScale = new Vector3(w.width, w.height, 0.04f);
                 SetOccluder(q);
             }
-            foreach (var o in Objects.Where(o => !o.isOpening))
-            {
-                var q = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                Destroy(q.GetComponent<Collider>());
-                q.name = $"Occluder_{o.label}";
-                q.transform.SetParent(root, false);
-                // Tables and desks are open underneath: occlude only the top slab so a virtual rug (or a chair tucked
-                // under) still shows between the legs. Couches, beds and storage are solid to the floor.
-                var top = o.center.y + o.size.y / 2;
-                var slab = o.label.Contains("TABLE") || o.label.Contains("DESK") ? Mathf.Min(0.05f, o.size.y) : o.size.y;
-                q.transform.SetPositionAndRotation(new Vector3(o.center.x, top - slab / 2, o.center.z), Quaternion.Euler(0, o.yawDeg, 0));
-                q.transform.localScale = new Vector3(o.size.x * 0.98f, slab * 0.98f, o.size.z * 0.98f);
-                SetOccluder(q);
-
-                // Solid furniture standing on the floor also gets a low "skirt" a few cm wider than its box: it hides
-                // only floor-level virtual items (rugs), so a rug stays under the couch even when the hand-drawn
-                // Space Setup box is slightly off, without clipping a virtual chair placed beside it.
-                var onFloor = o.center.y - o.size.y / 2 < FloorY + 0.1f;
-                if (onFloor && slab >= o.size.y)
-                {
-                    var skirt = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                    Destroy(skirt.GetComponent<Collider>());
-                    skirt.name = $"FloorSkirt_{o.label}";
-                    skirt.transform.SetParent(root, false);
-                    skirt.transform.SetPositionAndRotation(new Vector3(o.center.x, FloorY + 0.015f, o.center.z), Quaternion.Euler(0, o.yawDeg, 0));
-                    skirt.transform.localScale = new Vector3(o.size.x + 0.08f, 0.03f, o.size.z + 0.08f);
-                    SetOccluder(skirt);
-                }
-            }
         }
 
-        static void SetOccluder(GameObject go)
+        public static void SetOccluder(GameObject go)
         {
             var r = go.GetComponent<MeshRenderer>();
             r.sharedMaterial = VRShopMaterials.DepthOccluder;
@@ -434,17 +412,7 @@ namespace VRShop.Room
                 bb.transform.localScale = new Vector3(w.width, 0.1f, 0.02f);
                 bb.GetComponent<MeshRenderer>().sharedMaterial = VrMat(Color.Lerp(wallColor, Color.white, 0.5f));
             }
-            // Real furniture from Space Setup shown as soft gray blocks so the user keeps their bearings.
-            foreach (var o in Objects.Where(o => !o.isOpening))
-            {
-                var q = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                Destroy(q.GetComponent<Collider>());
-                q.name = $"Existing_{o.label}";
-                q.transform.SetParent(root, false);
-                q.transform.SetPositionAndRotation(o.center, Quaternion.Euler(0, o.yawDeg, 0));
-                q.transform.localScale = o.size;
-                q.GetComponent<MeshRenderer>().sharedMaterial = VrMat(new Color(0.7f, 0.7f, 0.72f));
-            }
+            // (Real furniture is drawn by each RealPiece as a soft gray block in this preview.)
             root.gameObject.SetActive(m_VrActive);
         }
 

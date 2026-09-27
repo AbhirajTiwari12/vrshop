@@ -39,13 +39,18 @@ namespace VRShop.Api
         public Task<Session> GetSession(string id, long since = 0) => Send<Session>("GET", $"/api/sessions/{id}" + (since > 0 ? $"?since={since}" : ""));
         public Task<Session> CreateDemoSession() => Send<Session>("POST", "/api/sessions/demo", new { });
         public Task PostGeometry(string id, RoomGeometryDto g) => Send<object>("POST", $"/api/sessions/{id}/geometry", g);
-        public Task<LayoutResponse> Layout(string id, List<string> productIds, UserDto user) => Send<LayoutResponse>("POST", $"/api/sessions/{id}/layout", new { productIds, user }, 20);
+        public Task<LayoutResponse> Layout(string id, List<string> productIds, UserDto user, List<FixedPlacement> fixedPlacements = null) =>
+            Send<LayoutResponse>("POST", $"/api/sessions/{id}/layout", new { productIds, user, @fixed = fixedPlacements ?? new List<FixedPlacement>() }, 20);
         public Task PutPlacements(string id, List<Placement> placements) => Send<object>("PUT", $"/api/sessions/{id}/placements", new { placements });
         public Task<Session> SetCart(string id, string productId, int qty) => Send<Session>("POST", $"/api/sessions/{id}/cart", new { productId, qty });
         public Task<Product> EnsureModel(string productId, bool generate = true) => Send<Product>("POST", $"/api/products/{productId}/model", new { generate });
         public Task<Product> GetProduct(string productId) => Send<Product>("GET", $"/api/products/{productId}");
         public Task<SearchResponse> Search(string id, string text) => Send<SearchResponse>("POST", $"/api/sessions/{id}/search", new { text }, 60);
-        public Task<VoiceResponse> Ask(string id, string text, string focusProductId = null) => Send<VoiceResponse>("POST", $"/api/sessions/{id}/ask", new { text, focusProductId }, 60);
+        public Task<VoiceResponse> Ask(string id, string text, string focusProductId = null, string pieceId = null) => Send<VoiceResponse>("POST", $"/api/sessions/{id}/ask", new { text, focusProductId, pieceId }, 60);
+        /// <summary>Keep / replace one real piece, change its type, or set the product standing in for it.</summary>
+        public Task<Session> SetRealPiece(string id, string pieceId, object patch) => Send<Session>("PUT", $"/api/sessions/{id}/real/{UnityWebRequest.EscapeURL(pieceId)}", patch);
+        public Task<CandidatesResponse> ReplacementCandidates(string id, string pieceId, string category = null, int limit = 12) =>
+            Send<CandidatesResponse>("GET", $"/api/sessions/{id}/real/{UnityWebRequest.EscapeURL(pieceId)}/candidates?limit={limit}" + (string.IsNullOrEmpty(category) ? "" : $"&category={UnityWebRequest.EscapeURL(category)}"), null, 45);
         public Task<Session> SetBrowse(string id, Filters filters) => Send<Session>("PUT", $"/api/sessions/{id}/browse", new { filters });
         public Task<Quote> Quote(string id) => Send<Quote>("GET", $"/api/sessions/{id}/checkout/quote");
         public Task<Session> StartCheckout(string id, bool allowOverBudget) => Send<Session>("POST", $"/api/sessions/{id}/checkout", new { via = "headset", allowOverBudget });
@@ -65,10 +70,11 @@ namespace VRShop.Api
             return req.downloadHandler.data;
         }
 
-        public async Task<VoiceResponse> Voice(string sessionId, byte[] wav, string focusProductId = null)
+        public async Task<VoiceResponse> Voice(string sessionId, byte[] wav, string focusProductId = null, string pieceId = null)
         {
             var form = new List<IMultipartFormSection> { new MultipartFormFileSection("audio", wav, "speech.wav", "audio/wav") };
             if (!string.IsNullOrEmpty(focusProductId)) form.Add(new MultipartFormDataSection("focusProductId", focusProductId));
+            if (!string.IsNullOrEmpty(pieceId)) form.Add(new MultipartFormDataSection("pieceId", pieceId));
             using var req = UnityWebRequest.Post($"{BaseUrl}/api/sessions/{sessionId}/voice", form);
             req.timeout = 60;
             await SendAsync(req);

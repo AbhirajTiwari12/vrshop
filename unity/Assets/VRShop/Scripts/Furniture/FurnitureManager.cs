@@ -71,6 +71,15 @@ namespace VRShop.Furniture
             PendingPoint = null;
             var toUser = head.position - pos; toUser.y = 0;
             var yaw = yawDeg ?? (toUser.sqrMagnitude > 0.01f ? Quaternion.LookRotation(toUser).eulerAngles.y : 0f);
+            var floorY = room != null ? room.FloorY : 0f;
+            var onTop = !isWall && pos.y > floorY + 0.05f; // "put a lamp here" at a tabletop
+            // A new piece never starts inside the user's real furniture (or another piece): nearest free spot instead.
+            // Explicit positions (layouts, replacements) are already solved.
+            if (!position.HasValue && !onTop && !isWall && p.category != "rug" && RealFurniture.Instance != null)
+            {
+                var d = p.dims ?? new Dims { w = 0.6f, d = 0.6f, h = 0.6f };
+                pos = RealFurniture.Instance.FreeSpot(pos, d.w, d.d, yaw, null, true);
+            }
             if (isWall && !position.HasValue && room != null)
             {
                 var w = room.NearestWall(pos, out _);
@@ -82,6 +91,7 @@ namespace VRShop.Furniture
             var item = go.AddComponent<FurnitureItem>();
             item.Init(p);
             Items.Add(item);
+            if (onTop && !position.HasValue) Stacking.Settle(item); // onto the top it was aimed at, or down to the floor
             if (select) ManipulationController.Instance?.Select(item);
             _ = LoadModel(item);
             Changed?.Invoke();
@@ -107,8 +117,16 @@ namespace VRShop.Furniture
                     return new Vector3(hit.point.x, floorY + Mathf.Max(0.1f, 1.45f - h / 2), hit.point.z) + hit.normal * (d / 2 + 0.01f);
                 }
             }
+            // Lamps and small plants: onto the tabletop the user just pointed at.
+            var lasers = FindObjectsByType<LaserPointer>(FindObjectsSortMode.None);
+            if (StackRules.IsStackable(p.category, p.dims))
+            {
+                var topPointer = lasers.Where(l => l.LastTopPoint.HasValue && Time.time - l.LastTopPointTime < 1.5f && (!l.LastFloorPoint.HasValue || l.LastTopPointTime > l.LastFloorPointTime))
+                    .OrderByDescending(l => l.LastTopPointTime).FirstOrDefault();
+                if (topPointer != null) return topPointer.LastTopPoint.Value;
+            }
             // Recently pointed floor spot, else ~1.6 m in front of the user.
-            var pointer = FindObjectsByType<LaserPointer>(FindObjectsSortMode.None).Where(l => l.LastFloorPoint.HasValue && Time.time - l.LastFloorPointTime < 1.5f).OrderByDescending(l => l.LastFloorPointTime).FirstOrDefault();
+            var pointer = lasers.Where(l => l.LastFloorPoint.HasValue && Time.time - l.LastFloorPointTime < 1.5f).OrderByDescending(l => l.LastFloorPointTime).FirstOrDefault();
             var depth = p.dims?.d ?? 0.6f;
             var pos = pointer != null ? pointer.LastFloorPoint.Value : head.position + fwd * (1.2f + depth / 2);
             pos.y = floorY;
@@ -164,6 +182,9 @@ namespace VRShop.Furniture
         public void Remove(FurnitureItem item)
         {
             if (item == null) return;
+            // Whatever stood on it drops to the floor nearby instead of disappearing with it.
+            foreach (var carried in Stacking.Carried(item)) Stacking.DropToFloor(carried);
+            RealFurniture.Instance?.OnItemRemoved(item);
             Items.Remove(item);
             if (ManipulationController.Instance != null && ManipulationController.Instance.Selected == item) ManipulationController.Instance.Select(null);
             Destroy(item.gameObject);
@@ -173,7 +194,8 @@ namespace VRShop.Furniture
 
         public void ClearAll()
         {
-            foreach (var i in Items.ToList()) Destroy(i.gameObject);
+            RealFurniture.Instance?.KeepAll(); // the real furniture comes back too
+            foreach (var i in Items.ToList()) if (i != null) Destroy(i.gameObject);
             Items.Clear();
             ManipulationController.Instance?.Select(null);
             Changed?.Invoke();
@@ -185,6 +207,8 @@ namespace VRShop.Furniture
         {
             var used = new HashSet<FurnitureItem>();
             var i = 0;
+            // Things moving between tops travel on their own; they re-settle on whatever top they land on at the end.
+            foreach (var it in Items) if (it != null && placements.Any(pl => pl.productId == it.Product.id)) Stacking.LiftOff(it);
             foreach (var pl in placements)
             {
                 var target = pl.position.ToVector3();
@@ -200,9 +224,29 @@ namespace VRShop.Furniture
                     item = Place(p, start, pl.yawDeg, false);
                 }
                 used.Add(item);
+                // Pieces already where they belong (a replacement pinned in its real piece's spot) stay still.
+                if ((item.transform.position - target).sqrMagnitude < 0.0004f && Quaternion.Angle(item.transform.rotation, rot) < 2f) continue;
                 StartCoroutine(Glide(item, target, rot, 0.35f + i * 0.18f));
                 i++;
             }
+            StartCoroutine(SettleAfter(0.35f + i * 0.18f + 1.0f));
+            ScheduleSync();
+        }
+
+        /// <summary>Once everything has landed, lamps and plants placed on tables stand on them (and move with them).</summary>
+        IEnumerator SettleAfter(float seconds)
+        {
+            yield return new WaitForSeconds(seconds);
+            var floorY = RoomService.Instance != null ? RoomService.Instance.FloorY : 0f;
+            foreach (var it in Items.ToList())
+                if (it != null && !it.IsWallMounted && it.transform.position.y > floorY + 0.05f) Stacking.Settle(it);
+        }
+
+        /// <summary>Slide an item to a new spot (making room for something), keeping its rotation.</summary>
+        public void GlideTo(FurnitureItem item, Vector3 target)
+        {
+            if (item == null) return;
+            StartCoroutine(Glide(item, target, item.transform.rotation, 0f));
             ScheduleSync();
         }
 

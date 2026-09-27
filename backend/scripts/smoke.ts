@@ -51,4 +51,28 @@ const geo = {
 await j(`/api/sessions/${s.id}/geometry`, { method: 'POST', body: JSON.stringify(geo) });
 const lay = await j(`/api/sessions/${s.id}/layout`, { method: 'POST', body: JSON.stringify({ productIds: picks }) });
 for (const p of lay.placements) console.log(`  place ${p.productId.padEnd(16)} (${p.position.x}, ${p.position.z}) yaw ${p.yawDeg}°  ${p.reason}`);
+// Real furniture: a couch against a wall and a coffee table, both from "Space Setup".
+const realGeo = {
+  floorY: 0, ceilingHeight: 2.6,
+  floorPolygon: [{ x: -2, z: 0 }, { x: 2, z: 0 }, { x: 2, z: 5 }, { x: -2, z: 5 }],
+  walls: [{ center: { x: 0, y: 1.3, z: 0 }, normal: { x: 0, y: 0, z: 1 }, width: 4, height: 2.6 }],
+  objects: [
+    { id: 'smoke-couch', label: 'COUCH', center: { x: 0, y: 0.42, z: 0.5 }, size: { x: 2.0, y: 0.84, z: 0.9 }, yawDeg: 0 },
+    { id: 'smoke-table', label: 'TABLE', center: { x: 0, y: 0.22, z: 1.7 }, size: { x: 1.1, y: 0.44, z: 0.6 }, yawDeg: 0 },
+  ],
+};
+await j(`/api/sessions/${s.id}/geometry`, { method: 'POST', body: JSON.stringify(realGeo) });
+let rs = await j(`/api/sessions/${s.id}`);
+console.log('real furniture:', Object.values(rs.realFurniture).map((p: any) => `${p.label} -> ${p.category} (${p.state})`).join(', '));
+const t0 = Date.now();
+const cand = await j(`/api/sessions/${s.id}/real/smoke-couch/candidates`);
+console.log(`  couch candidates (${Date.now() - t0} ms): ${cand.products.length}, e.g. ${cand.products.slice(0, 3).map((p: any) => `${p.title} ${p.dims ? `${Math.round(p.dims.w * 100)}x${Math.round(p.dims.d * 100)}` : '?'}`).join(' | ')}`);
+rs = await j(`/api/sessions/${s.id}/real/smoke-couch`, { method: 'PUT', body: JSON.stringify({ state: 'replace', replacementId: cand.products[0]?.id }) });
+console.log(`  couch: ${rs.realFurniture['smoke-couch'].state} with ${rs.products[rs.realFurniture['smoke-couch'].replacementId]?.title}`);
+const realLay = await j(`/api/sessions/${s.id}/layout`, { method: 'POST', body: JSON.stringify({ productIds: [cand.products[0].id, ...picks.slice(0, 3)] }) });
+for (const p of realLay.placements) console.log(`  place ${p.productId.padEnd(16)} (${p.position.x}, ${p.position.z}) yaw ${p.yawDeg}°  ${p.reason}`);
+const said = await j(`/api/sessions/${s.id}/ask`, { method: 'POST', body: JSON.stringify({ text: 'replace my coffee table with a round one' }) });
+console.log(`  ask "replace my coffee table with a round one" -> ${said.action}: ${said.reply} [${said.replace?.productIds.length ?? 0} candidates]`);
+await j(`/api/sessions/${s.id}/real/smoke-couch`, { method: 'PUT', body: JSON.stringify({ state: 'keep' }) });
+
 console.log('\nOK — open', `${health.baseUrl}/#/s/${s.id}`);

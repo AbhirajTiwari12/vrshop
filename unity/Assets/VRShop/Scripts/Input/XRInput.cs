@@ -16,8 +16,9 @@ namespace VRShop.Input
     /// controller with the mouse and the face buttons with the keyboard, so the whole app is testable
     /// in Play mode on a Mac.
     ///
-    /// Controls (Quest):  trigger = select / drag,  right stick = rotate,  A = catalog,  B = delete,
-    ///                    hold X = voice,  grip = drag too.  (Y is unused: the app is MR-only.)
+    /// Controls (Quest):  trigger = select / drag,  right stick ← → = rotate,  stick ↑ ↓ = next replacement for a
+    ///                    replaced real piece,  A = catalog,  B = delete,  hold X = voice,  grip = drag too.
+    ///                    (Y is unused: the app is MR-only.)
     /// Controls (Editor): left click = trigger,  scroll = rotate,  Tab = A,  Backspace = B,  hold V = X,
     ///                    WASD + arrow keys = walk / look,  Q/E = down/up.
     /// </summary>

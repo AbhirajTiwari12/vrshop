@@ -8,6 +8,7 @@
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
     "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
     "smoke": "tsx scripts/smoke.ts",
     "reset": "tsx scripts/reset.ts",
     "gen-test": "tsx scripts/gen-test.ts",

@@ -1,8 +1,10 @@
+using System;
 using System.Collections;
 using UnityEngine;
 using VRShop.Api;
 using VRShop.Interaction;
 using VRShop.Rendering;
+using VRShop.Room;
 using VRShop.UI;
 
 namespace VRShop.Furniture
@@ -25,6 +27,25 @@ namespace VRShop.Furniture
         public FitState Fit { get; private set; } = FitState.Ok;
         public string FitMessage { get; private set; } = "";
         public bool Selected { get; private set; }
+        /// <summary>Set when this product stands in for one of the user's real pieces ("replace my couch"). Its info then
+        /// shows on the piece's card (RealPieceTag) instead of this item's own tag.</summary>
+        public string ReplacesPieceId
+        {
+            get => m_ReplacesPieceId;
+            set { m_ReplacesPieceId = value; if (m_Tag != null) m_Tag.SetVisible(ShowOwnTag); }
+        }
+        string m_ReplacesPieceId;
+        bool IsReplacement => !string.IsNullOrEmpty(m_ReplacesPieceId);
+        bool ShowOwnTag => !IsReplacement && (Selected || m_Hover || !ModelLoaded);
+        /// <summary>The user dragged or turned it themselves (so automatic re-fitting leaves it alone).</summary>
+        public bool UserMoved { get; set; }
+        /// <summary>Standing on one of the user's real tables / storage (by Space Setup anchor id). See Stacking.</summary>
+        public string RestingOnPieceId { get; set; }
+        /// <summary>The placed piece this one stands on (it's parented to it, so it moves and turns along).</summary>
+        public FurnitureItem Carrier => transform.parent != null ? transform.parent.GetComponent<FurnitureItem>() : null;
+        public bool IsResting => Carrier != null || !string.IsNullOrEmpty(RestingOnPieceId);
+        /// <summary>Fired once the real 3D model is in and Dims are its measured size.</summary>
+        public event Action<FurnitureItem> ModelReady;
 
         Transform m_Visual;
         GameObject m_Ghost;
@@ -157,6 +178,11 @@ namespace VRShop.Furniture
             ModelLoaded = true;
             m_Status = "";
             RefreshTag();
+            m_Tag.SetVisible(ShowOwnTag);
+            // Its measured size can differ from the listing: things on it follow its real top, and it re-fits its own top.
+            Stacking.Reseat(this);
+            if (IsResting) Stacking.Settle(this);
+            ModelReady?.Invoke(this);
             // little "settle" animation
             var t = 0f;
             while (t < 1f && m_Model != null)
@@ -169,11 +195,27 @@ namespace VRShop.Furniture
             if (m_Model != null) m_Model.transform.localScale = Vector3.one;
         }
 
+        /// <summary>Grow up out of the floor (a replacement taking over a real piece's spot).</summary>
+        public void PlayRise(float seconds = 0.7f) => StartCoroutine(Rise(seconds));
+
+        IEnumerator Rise(float seconds)
+        {
+            var t = 0f;
+            while (t < 1f && m_Visual != null)
+            {
+                t += Time.deltaTime / seconds;
+                var e = Mathf.SmoothStep(0, 1, t);
+                m_Visual.localScale = new Vector3(Mathf.Lerp(0.96f, 1f, e), Mathf.Max(0.02f, e), Mathf.Lerp(0.96f, 1f, e));
+                yield return null;
+            }
+            if (m_Visual != null) m_Visual.localScale = Vector3.one;
+        }
+
         public void SetSelected(bool on)
         {
             Selected = on;
             UpdateOutline();
-            m_Tag.SetVisible(on || m_Hover || !ModelLoaded);
+            m_Tag.SetVisible(ShowOwnTag);
         }
 
         public void SetFit(FitState state, string message)
@@ -183,6 +225,7 @@ namespace VRShop.Furniture
             FitMessage = message;
             UpdateOutline();
             RefreshTag();
+            if (IsReplacement) RealFurniture.Instance?.PieceOf(this)?.RefreshTag();
         }
 
         void UpdateOutline()
@@ -199,8 +242,8 @@ namespace VRShop.Furniture
         }
 
         // ------------------------------------------------------------------ pointer
-        public void OnHoverEnter(PointerEvent e) { m_Hover = true; UpdateOutline(); m_Tag.SetVisible(true); }
-        public void OnHoverExit(PointerEvent e) { m_Hover = false; UpdateOutline(); m_Tag.SetVisible(Selected || !ModelLoaded); }
+        public void OnHoverEnter(PointerEvent e) { m_Hover = true; UpdateOutline(); m_Tag.SetVisible(ShowOwnTag); }
+        public void OnHoverExit(PointerEvent e) { m_Hover = false; UpdateOutline(); m_Tag.SetVisible(ShowOwnTag); }
         public void OnPress(PointerEvent e) => ManipulationController.Instance?.BeginDrag(this, e);
         public void OnRelease(PointerEvent e, bool clicked) => ManipulationController.Instance?.EndDrag(this, e, clicked);
 
