@@ -215,7 +215,7 @@ namespace VRShop.Interaction
             var rf = RealFurniture.Instance;
             if (rf == null || item.Dims == null || item.IsWallMounted || item.IsFloorLayer) { m_InReal = false; return; }
             var box = Obb.Of(item.transform, item.Dims.w, item.Dims.d);
-            var inReal = rf.Solids().Any(s => box.Overlaps(s));
+            var inReal = rf.Solids(item.Dims.h).Any(s => box.Overlaps(s));
             if (inReal && !m_InReal) XRInput.Instance?.Haptic(m_Hand, 0.18f, 0.025f);
             m_InReal = inReal;
         }
@@ -229,8 +229,8 @@ namespace VRShop.Interaction
             var pos = item.transform.position;
             var yaw = item.transform.eulerAngles.y;
             var box = Obb.Of(item.transform, item.Dims.w, item.Dims.d);
-            if (!rf.Solids().Any(s => box.Overlaps(s))) return;
-            var spot = rf.FreeSpot(pos, item.Dims.w, item.Dims.d, yaw, item);
+            if (!rf.Solids(item.Dims.h).Any(s => box.Overlaps(s))) return;
+            var spot = rf.FreeSpot(pos, item.Dims.w, item.Dims.d, yaw, item, false, item.Dims.h);
             if ((spot - pos).sqrMagnitude < 0.0001f) return;
             FurnitureManager.Instance?.GlideTo(item, spot);
             XRInput.Instance?.Haptic(m_Hand, 0.3f, 0.05f);
@@ -251,6 +251,7 @@ namespace VRShop.Interaction
             foreach (var h in hits)
             {
                 if (!h.collider.TryGetComponent<RoomSurface>(out var s) || s.kind != SurfaceKind.Wall) continue;
+                if (Mathf.Abs(h.normal.y) > 0.7f) continue; // the wall collider's top or bottom face: no facing to take
                 IsDragging = true;
                 var d = item.Dims?.d ?? 0.03f;
                 var hgt = item.Dims?.h ?? 0.6f;
@@ -307,7 +308,8 @@ namespace VRShop.Interaction
                 return;
             }
 
-            if (!item.IsWallMounted && room != null && room.Outline.Count >= 3 && box.Corners().Any(c => !room.Contains(c)))
+            var inner = new Obb(new Vector3(box.Center.x, 0, box.Center.y), Mathf.Max(0.01f, box.HalfWidth - 0.02f), Mathf.Max(0.01f, box.HalfDepth - 0.02f), box.YawDeg);
+            if (!item.IsWallMounted && room != null && room.Outline.Count >= 3 && inner.Corners().Any(c => !room.Contains(c)))
             {
                 item.SetFit(FitState.OutsideRoom, "Goes past your wall");
                 return;
@@ -328,7 +330,7 @@ namespace VRShop.Interaction
                 {
                     foreach (var piece in rf.Pieces)
                     {
-                        if (piece == null || piece.IsReplaced) continue;
+                        if (piece == null || piece.IsReplaced || RealFurniture.Above(piece, item.Dims.h, room != null ? room.FloorY : 0f)) continue;
                         if (box.Penetration(piece.Footprint, out var push) && push.magnitude > 0.015f)
                         {
                             item.SetFit(FitState.Overlap, $"Overlaps your {piece.Name} by {Mathf.Max(1, Mathf.RoundToInt(push.magnitude * 100))} cm");

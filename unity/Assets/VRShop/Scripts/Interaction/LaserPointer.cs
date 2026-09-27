@@ -37,6 +37,7 @@ namespace VRShop.Interaction
         Transform m_Reticle;
         Material m_LineMat;
         readonly RaycastHit[] m_Hits = new RaycastHit[24];
+        readonly Collider[] m_Inside = new Collider[8];
         float m_PressTime;
         Vector3 m_PressPoint;
 
@@ -83,16 +84,37 @@ namespace VRShop.Interaction
             IPointerTarget target = null;
             RaycastHit best = default;
             var found = false;
-            for (var i = 0; i < count; i++)
+            var dragging = ManipulationController.Instance != null && ManipulationController.Instance.IsDragging;
+            // Panels and the designer draw over the room (UIKit.Overlay), so they're what the user is pointing at even
+            // with a wall or a piece of furniture nearer along the ray (the orb follows the head, even up against a wall).
+            if (!dragging)
+            {
+                for (var i = 0; i < count && !found; i++)
+                {
+                    var t = FindTarget(m_Hits[i].collider);
+                    if (t is IOverlayTarget) { best = m_Hits[i]; target = t; found = true; }
+                }
+            }
+            for (var i = 0; i < count && !found; i++)
             {
                 var h = m_Hits[i];
                 // Ignore the object being dragged so we can see the floor through it.
                 var t = FindTarget(h.collider);
-                if (Pressed != null && t == Pressed && ManipulationController.Instance != null && ManipulationController.Instance.IsDragging) continue;
+                if (Pressed != null && t == Pressed && dragging) continue;
                 best = h;
                 target = t;
                 found = true;
-                break;
+            }
+            // A ray never hits a collider it starts inside: with the controller inside a piece of furniture (reaching
+            // over a table, into a couch's box), that piece is what it points at.
+            if (!dragging && !(target is IOverlayTarget))
+            {
+                var n = Physics.OverlapSphereNonAlloc(ray.origin, 0.01f, m_Inside, ~0, QueryTriggerInteraction.Collide);
+                for (var i = 0; i < n; i++)
+                {
+                    var t = FindTarget(m_Inside[i]);
+                    if (t is Furniture.FurnitureItem || t is Room.RealPiece) { target = t; break; }
+                }
             }
 
             HasHit = found;

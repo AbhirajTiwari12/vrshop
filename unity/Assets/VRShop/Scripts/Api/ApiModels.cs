@@ -184,7 +184,7 @@ namespace VRShop.Api
         public string why;
         public PlacementHint placement;
         public List<string> productIds = new List<string>();
-        public string origin; // analysis | voice | search
+        public string origin; // analysis | voice | search | design
         public List<string> theme; // set when these products carry the room's theme (e.g. race-car beds from stores)
     }
 
@@ -205,6 +205,8 @@ namespace VRShop.Api
         public Vec3 position;
         public float yawDeg;
         public string reason;
+        public string instanceId;      // design: move this existing piece instead of spawning one
+        public string replacesPieceId; // design: stands in for this real piece (RealFurniture puts it there on session sync)
     }
 
     public class Session
@@ -260,6 +262,32 @@ namespace VRShop.Api
     public class ReplaceResult { public string pieceId; public string category; public List<string> productIds = new List<string>(); public List<Product> products = new List<Product>(); }
     public class UserDto { public Vec3 position; public Vec3 forward; }
 
+    /// <summary>A piece standing in the headset scene, sent so a design can replace or work around it.</summary>
+    public class PlacedPieceDto { public string instanceId; public string productId; public string category; public Vec3 position; public float yawDeg; public Dims dims; public string replacesPieceId; }
+
+    public class DesignStyle { public string key; public string label; public string blurb; public List<string> swatches = new List<string>(); }
+    public class DesignStylesResponse { public List<DesignStyle> styles = new List<DesignStyle>(); }
+
+    public class SkippedPiece { public string productId; public string label; public string reason; }
+
+    /// <summary>"Design my room": the new pieces, which old ones they replace, and what the designer says about it.</summary>
+    public class DesignResponse
+    {
+        public string mode;            // style | bag
+        public string style;
+        public string styleLabel;
+        public string roomType;
+        public string concept;
+        public List<Placement> placements = new List<Placement>();
+        public List<string> remove = new List<string>();          // headset pieces the design supersedes
+        public List<string> replacedPieces = new List<string>();  // real pieces (anchor ids) now replaced by design picks
+        public List<string> replacedLabels = new List<string>();
+        public List<SkippedPiece> skipped = new List<SkippedPiece>();
+        public float total;
+        public bool usedDefaultRoom;
+        public Session session;
+    }
+
     public class RoomGeometryDto
     {
         public float floorY;
@@ -279,7 +307,8 @@ namespace VRShop.Api
     {
         public string transcript;
         public string reply;
-        public string action;     // none | open | add_to_cart | remove_from_cart | place | checkout | replace
+        public string action;     // none | open | add_to_cart | remove_from_cart | place | checkout | replace | design
+        public string style;      // design: the style asked for (empty = match the room)
         public string productId;  // the product the action/question refers to
         public bool atPointer;
         public BrowseResult browse;

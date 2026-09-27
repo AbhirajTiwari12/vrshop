@@ -17,6 +17,8 @@ namespace VRShop.UI
     ///   Browse  — the whole pulled catalog, narrowed by voice or by filter chips with drop-down menus;
     ///   Bag     — what you're buying, the budget, and "Buy the room with Visa" (agent checkout).
     /// Products sit on a shelf of four large cards; a card opens a detail view with Place / Add to bag.
+    /// "Design my room" opens a style picker (Modern, Victorian, Japandi…): the designer furnishes the whole room in
+    /// that style, replacing what's already there instead of piling new pieces on top.
     /// Summon / hide with A.
     /// </summary>
     public class CatalogPanel : MonoBehaviour
@@ -28,8 +30,10 @@ namespace VRShop.UI
         const int PerPage = 4, BagPerPage = 4, MaxChips = 12, MaxDots = 12;
         const float CardW = 262, CardH = 392, CardGap = 24, CardX = 80, CardY = 256;
         const float ChipY = 184, ChipH = 48;
+        const float Distance = 0.95f, Drop = 0.04f;         // placed just below eye level; the designer orb hangs under it
 
-        enum View { ForYou, Browse, Bag, Visa }
+        enum View { ForYou, Browse, Bag, Visa, Design }
+        const int MaxStyles = 12;
 
         static readonly (float min, float max, string label)[] k_PricePresets =
             { (0, 0, "Any price"), (0, 200, "Under $200"), (0, 500, "Under $500"), (0, 1000, "Under $1,000"), (0, 2000, "Under $2,000"), (1000, 0, "$1,000 and up") };
@@ -93,6 +97,12 @@ namespace VRShop.UI
         readonly List<Image> m_Loader = new List<Image>();
         bool m_Loading;
 
+        // design (style picker)
+        RectTransform m_DesignView;
+        readonly List<StyleCard> m_StyleCards = new List<StyleCard>();
+        UIButton m_DMatch, m_DBag;
+        string m_LastStyle;
+
         // footer
         UIButton m_Design, m_More, m_Clear;
         float m_ClearArmedUntil;
@@ -117,6 +127,14 @@ namespace VRShop.UI
             public string productId;
         }
 
+        class StyleCard
+        {
+            public UIButton button;
+            public TextMeshProUGUI label, blurb, current;
+            public readonly List<Image> swatches = new List<Image>();
+            public string key;
+        }
+
         class BagRow
         {
             public RectTransform root;
@@ -126,6 +144,10 @@ namespace VRShop.UI
         }
 
         public bool IsOpen => m_Visible;
+        /// <summary>Open and in front of the user (the designer orb then sits at its bottom edge).</summary>
+        public bool InView => m_Visible && IsInView();
+        /// <summary>Middle of the panel's bottom edge, in world space.</summary>
+        public Vector3 BottomCenter => transform.position - transform.up * (H * Scale / 2);
         public string FocusedProductId => m_DetailProduct?.id;
 
         void Awake()
@@ -137,7 +159,7 @@ namespace VRShop.UI
 
         void Start()
         {
-            UIKit.PlaceInFront(transform, 0.95f, 0.12f);
+            UIKit.PlaceInFront(transform, Distance, Drop);
             if (VRShopApp.Instance != null) VRShopApp.Instance.SessionChanged += _ => Refresh();
         }
 
@@ -162,7 +184,7 @@ namespace VRShop.UI
         {
             m_Visible = true;
             m_Canvas.gameObject.SetActive(true);
-            UIKit.PlaceInFront(transform, 0.95f, 0.12f);
+            UIKit.PlaceInFront(transform, Distance, Drop);
         }
 
         public void Hide()
@@ -174,7 +196,8 @@ namespace VRShop.UI
 
         bool IsInView()
         {
-            var head = XRInput.Instance.Head;
+            var head = XRInput.Instance != null ? XRInput.Instance.Head : null;
+            if (head == null) return false;
             var to = (transform.position - head.position).normalized;
             return Vector3.Dot(head.forward, to) > 0.6f;
         }
@@ -182,7 +205,7 @@ namespace VRShop.UI
         // ================================================================== build
         void Build()
         {
-            m_Canvas = UIKit.CreateCanvas("CatalogCanvas", new Vector2(W + 120, H + 120), Scale);
+            m_Canvas = UIKit.CreateCanvas("CatalogCanvas", new Vector2(W + 120, H + 120), Scale, UIKit.OrderCatalog);
             m_Canvas.transform.SetParent(transform, false);
             m_Group = m_Canvas.gameObject.AddComponent<CanvasGroup>();
             // Everything lives in a W x H root centered in a slightly larger canvas (room for the soft shadow).
@@ -197,6 +220,7 @@ namespace VRShop.UI
             BuildDetail(root);
             BuildBag(root);
             BuildVisa(root);
+            BuildDesign(root);
             BuildMessage(root);
             BuildFooter(root);
             m_Menu = ChipMenu.Create(root, W, H); // last: draws on top
@@ -353,6 +377,92 @@ namespace VRShop.UI
             UIKit.Button(side, "Back", rw - 28 - 120, 392, 120, 52, "Back", 17, () => Go(View.Bag), ButtonStyle.Ghost);
         }
 
+        void BuildDesign(Transform root)
+        {
+            m_DesignView = UIKit.Box(root, "Design", 0, 0, W, H);
+            const int cols = 4;
+            const float gap = 16, top = 196, cw = (W - 2 * M - (cols - 1) * gap) / cols, ch = 124;
+            for (var i = 0; i < MaxStyles; i++)
+            {
+                var idx = i;
+                var x = M + (i % cols) * (cw + gap);
+                var y = top + (i / cols) * (ch + 14);
+                var shadow = UIKit.Shadow(m_DesignView, $"StyleShadow{i}", x, y, cw, ch, 16, 0.07f, 6);
+                var btn = UIKit.Button(m_DesignView, $"Style{i}", x, y, cw, ch, "", 1, () => PickStyle(idx), ButtonStyle.Card);
+                btn.Shadow = shadow;
+                btn.Label.gameObject.SetActive(false);
+                var t = btn.transform;
+                var c = new StyleCard { button = btn };
+                for (var k = 0; k < 3; k++)
+                {
+                    var ring = UIKit.Dot(t, $"Ring{k}", 20 + k * 26, 20, 24, Theme.Line);
+                    c.swatches.Add(UIKit.Dot(ring.transform, "Swatch", 2, 2, 20, Color.clear));
+                }
+                c.current = UIKit.Eyebrow(t, "Current", cw - 120, 24, 100, "Current", Theme.Brass, 12);
+                c.current.alignment = TextAlignmentOptions.TopRight;
+                c.label = UIKit.Text(t, "Label", 20, 52, cw - 40, 36, "", 26, Theme.Ink, Face.Serif);
+                c.label.textWrappingMode = TextWrappingModes.NoWrap;
+                c.blurb = UIKit.Text(t, "Blurb", 20, 88, cw - 40, 26, "", 15, Theme.Muted);
+                c.blurb.textWrappingMode = TextWrappingModes.NoWrap;
+                c.blurb.overflowMode = TextOverflowModes.Ellipsis;
+                m_StyleCards.Add(c);
+            }
+            m_DMatch = UIKit.Button(m_DesignView, "MatchRoom", M, 628, 250, 56, "Match my room's style", 18, () => StartDesign(null, false), ButtonStyle.Secondary);
+            m_DBag = UIKit.Button(m_DesignView, "ArrangeBag", M + 264, 628, 230, 56, "Arrange my bag", 18, () => StartDesign(null, true), ButtonStyle.Secondary);
+            UIKit.Text(m_DesignView, "Note", M + 516, 628, W - 2 * M - 516, 56,
+                "Pieces of the same kind already in your room are replaced, never doubled up.", 16, Theme.Muted, Face.Regular, TextAlignmentOptions.MidlineLeft);
+        }
+
+        void ShowDesignView()
+        {
+            SetContent(m_DesignView);
+            var styles = VRShopApp.Instance != null ? VRShopApp.Instance.DesignStyles : new List<DesignStyle>();
+            for (var i = 0; i < m_StyleCards.Count; i++)
+            {
+                var c = m_StyleCards[i];
+                var st = i < styles.Count ? styles[i] : null;
+                c.button.gameObject.SetActive(st != null);
+                c.button.Shadow.gameObject.SetActive(st != null);
+                if (st == null) continue;
+                c.key = st.key;
+                c.label.text = st.label;
+                c.blurb.text = st.blurb;
+                c.current.gameObject.SetActive(st.key == m_LastStyle);
+                for (var k = 0; k < c.swatches.Count; k++)
+                {
+                    var has = st.swatches != null && k < st.swatches.Count;
+                    c.swatches[k].transform.parent.gameObject.SetActive(has);
+                    if (has) c.swatches[k].color = VRShopMaterials.Hex(st.swatches[k], Color.clear);
+                }
+            }
+            var count = S?.cart?.Sum(c => c.qty) ?? 0;
+            m_DBag.SetLabel(count > 0 ? $"Arrange my bag · {count}" : "Arrange my bag");
+            m_DBag.Interactable = count > 0;
+        }
+
+        void PickStyle(int slot)
+        {
+            var key = slot < m_StyleCards.Count ? m_StyleCards[slot].key : null;
+            if (!string.IsNullOrEmpty(key)) StartDesign(key, false);
+        }
+
+        void StartDesign(string style, bool bag)
+        {
+            if (!bag) m_LastStyle = style;
+            VRShopApp.Instance.DesignMyRoom(style, bag);
+        }
+
+        /// <summary>After a design, "For you" opens on the designed pieces (without showing the panel).</summary>
+        public void FocusQuietly(string category)
+        {
+            m_Category = category;
+            m_ChipPage = -1;
+            m_View = View.ForYou;
+            m_Page = 0;
+            m_DetailProduct = null;
+            Refresh();
+        }
+
         void BuildMessage(Transform root)
         {
             m_Message = UIKit.Box(root, "Message", 0, 0, W, H);
@@ -364,12 +474,13 @@ namespace VRShop.UI
         void BuildFooter(Transform root)
         {
             UIKit.Hairline(root, "FooterLine", M, 710, W - 2 * M);
+            // The designer orb itself hangs at the middle of this edge (AssistantOrb), so the hint stays clear of the center.
             UIKit.Dot(root, "OrbGlow", M - 5, 743, 26, Theme.WithAlpha(Theme.Brass, 0.25f));
             UIKit.Dot(root, "OrbDot", M + 1, 749, 14, Theme.Brass);
-            UIKit.Text(root, "Hint", M + 30, 732, 600, 36, "Talk to your designer: hold X, or point at the orb and pull the trigger", 16, Theme.Muted, Face.Regular, TextAlignmentOptions.MidlineLeft);
+            UIKit.Text(root, "Hint", M + 30, 732, 480, 36, "Talk to your designer: hold X, or tap the orb", 16, Theme.Muted, Face.Regular, TextAlignmentOptions.MidlineLeft);
             UIKit.Button(root, "Close", 716, 728, 112, 52, "Close", 18, Hide, ButtonStyle.Ghost);
             m_Clear = UIKit.Button(root, "Clear", 832, 728, 140, 52, "Clear room", 18, ClearRoom, ButtonStyle.Ghost);
-            m_Design = UIKit.Button(root, "Design", 980, 728, W - M - 980, 52, "Design my room", 19, () => VRShopApp.Instance.DesignMyRoom(), ButtonStyle.Primary);
+            m_Design = UIKit.Button(root, "Design", 980, 728, W - M - 980, 52, "Design my room", 19, () => Go(View.Design), ButtonStyle.Primary);
             m_More = UIKit.Button(root, "More", 980, 728, W - M - 980, 52, "Search stores for more", 17, SearchStores, ButtonStyle.Primary);
             m_More.gameObject.SetActive(false);
         }
@@ -409,6 +520,7 @@ namespace VRShop.UI
             m_BagView.gameObject.SetActive(which == m_BagView);
             m_Message.gameObject.SetActive(which == m_Message);
             m_VisaView.gameObject.SetActive(which == m_VisaView);
+            m_DesignView.gameObject.SetActive(which == m_DesignView);
             // The chip row belongs to the shelf; the detail view puts its Back link there instead.
             var chips = which == m_Grid || (which == m_Message && m_View == View.Browse);
             m_CategoryRow.gameObject.SetActive(chips && m_View == View.ForYou);
@@ -464,7 +576,7 @@ namespace VRShop.UI
         {
             var p = S?.GetProduct(productId);
             if (p == null) return;
-            if (m_View == View.Bag || m_View == View.Visa) m_View = View.Browse;
+            if (m_View == View.Bag || m_View == View.Visa || m_View == View.Design) m_View = View.Browse;
             Show();
             m_DetailProduct = p;
             m_BackTo = null; // opened by voice: plain "Back"
@@ -483,7 +595,7 @@ namespace VRShop.UI
             {
                 // Head tracking may not have been valid in Start(); place again once we have content.
                 m_PlacedWithSession = true;
-                if (m_Visible) UIKit.PlaceInFront(transform, 0.95f, 0.12f);
+                if (m_Visible) UIKit.PlaceInFront(transform, Distance, Drop);
             }
             var cats = s.categories ?? new List<CategoryResult>();
             if (m_Category == null || cats.All(c => c.category != m_Category))
@@ -501,7 +613,7 @@ namespace VRShop.UI
         {
             var count = S?.cart?.Sum(c => c.qty) ?? 0;
             m_NavBag.SetLabel(count > 0 ? $"Bag · {count}" : "Bag");
-            var sel = m_View == View.ForYou ? m_NavForYou : m_View == View.Browse ? m_NavBrowse : m_NavBag;
+            var sel = m_View == View.ForYou || m_View == View.Design ? m_NavForYou : m_View == View.Browse ? m_NavBrowse : m_NavBag;
             foreach (var b in new[] { m_NavForYou, m_NavBrowse, m_NavBag }) b.Selected = b == sel;
             var rt = (RectTransform)sel.transform;
             var w = UIKit.MeasureWidth(sel.Label, sel.Label.text);
@@ -533,6 +645,11 @@ namespace VRShop.UI
                         s.budget.HasValue ? $"{UIKit.Money(s.cartTotal)} of your {UIKit.Money(s.budget)} budget" : UIKit.Money(s.cartTotal);
                     break;
                 }
+                case View.Design:
+                    eyebrow = "Design my room";
+                    title = "Choose a style";
+                    sub = "I'll pick real pieces that suit your room and each other, then arrange them around you.";
+                    break;
                 case View.Visa:
                     eyebrow = "Checkout with Visa";
                     title = "Buy the room";
@@ -592,6 +709,7 @@ namespace VRShop.UI
             {
                 case View.Bag: ShowBag(s); return;
                 case View.Visa: ShowVisaView(s); return;
+                case View.Design: ShowDesignView(); return;
                 case View.Browse: ShowBrowseGrid(s); return;
             }
             if (s.categories == null || s.categories.Count == 0)
@@ -608,7 +726,8 @@ namespace VRShop.UI
         void RefreshFooter()
         {
             if (m_Design == null) return;
-            m_Design.Interactable = S != null && S.categories != null && S.categories.Count > 0;
+            m_Design.Interactable = S != null;
+            m_Design.Selected = m_View == View.Design;
             var b = S?.browse;
             var thin = m_View == View.Browse && m_DetailProduct == null && b != null && b.total < 6 &&
                        (!string.IsNullOrEmpty(b.filters?.category) || (b.filters?.keywords?.Count ?? 0) > 0);

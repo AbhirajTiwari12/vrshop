@@ -163,6 +163,8 @@ iPhone web app ──► backend (Node/TS, Express)  ◄──── Quest 2 (Un
 | `POST /api/catalog/pull {shopping: none\|light\|full}` | start a bulk pull in the background |
 | `POST /api/sessions/:id/geometry` | Quest room model |
 | `POST /api/sessions/:id/layout {productIds, user}` | → placements |
+| `POST /api/sessions/:id/design {mode: style\|bag, style, placed, user}` | "Design my room": styled picks (or the bag) laid out; same-kind pieces are replaced, never doubled up → placements, removals, replaced real pieces |
+| `GET /api/design/styles` | the design styles (Modern, Victorian, Scandinavian, …) |
 | `PUT /api/sessions/:id/placements` | what's placed, synced to the phone |
 | `POST /api/sessions/:id/cart {productId, qty}` | update the cart |
 | `POST /api/products/:id/model {generate}` | start model preparation |

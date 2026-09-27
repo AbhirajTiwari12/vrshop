@@ -36,7 +36,7 @@ namespace VRShop.UI
 
         public static RealPieceTag Create(RealPiece piece)
         {
-            var canvas = UIKit.CreateCanvas($"RealTag_{piece.Id}", new Vector2(W + 60, CanvasH), 0.0006f);
+            var canvas = UIKit.CreateCanvas($"RealTag_{piece.Id}", new Vector2(W + 60, CanvasH), 0.0006f, UIKit.OrderCard + 1);
             var tag = canvas.gameObject.AddComponent<RealPieceTag>();
             tag.m_Piece = piece;
             tag.m_Group = canvas.gameObject.AddComponent<CanvasGroup>();

@@ -4,8 +4,8 @@ using UnityEngine;
 namespace VRShop.Room
 {
     /// <summary>
-    /// Where a replacement product stands so it reads as "the new one in the old one's place": its width runs along the
-    /// real piece's long side; if the piece backs onto a wall, the product's back goes against that same wall and it faces
+    /// Where a replacement product stands so it reads as "the new one in the old one's place": its long side runs along
+    /// the real piece's long side (a sofa's width, a bed's length); if the piece backs onto a wall, the product's back goes against that same wall and it faces
     /// into the room; otherwise it's centered on the piece, facing the room. Pieces raised off the floor (a lamp on a
     /// table) keep their height. Mirrors replacementPose() in backend/src/realPose.ts; keep the two in step.
     /// </summary>
@@ -33,9 +33,13 @@ namespace VRShop.Room
             var longIsX = size.x >= size.z;
             var ratio = Mathf.Max(size.x, size.z) / Mathf.Max(Mathf.Min(size.x, size.z), 0.01f);
 
-            // Front/back axis = across the short side; square-ish pieces may face either way, so try both axes.
-            var axes = new List<(Vector2 n, float half)> { (longIsX ? f : r, (longIsX ? size.z : size.x) / 2) };
-            if (ratio < 1.15f) axes.Add((longIsX ? r : f, (longIsX ? size.x : size.z) / 2));
+            // Front/back axis = across the short side for a wide piece (a sofa), along the long side for a deep one (a bed
+            // runs head to foot); square-ish pieces may face either way, so try both axes.
+            var across = (n: longIsX ? f : r, half: (longIsX ? size.z : size.x) / 2);
+            var along = (n: longIsX ? r : f, half: (longIsX ? size.x : size.z) / 2);
+            var deep = productD > productW * 1.1f;
+            var axes = new List<(Vector2 n, float half)> { deep && ratio >= 1.15f ? along : across };
+            if (ratio < 1.15f) axes.Add(along);
 
             Vector2? front = null;
             var half = axes[0].half;

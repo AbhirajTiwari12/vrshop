@@ -21,6 +21,7 @@ import { ensureModel, modelFile } from './models/pipeline.js';
 import { solveLayout, defaultGeometry, type FixedPlacement, type LayoutItem } from './layout.js';
 import { replacementCandidates, setPiece, syncPieces, warmCandidates } from './realFurniture.js';
 import { labelName, replacementPose } from './realPose.js';
+import { designRoom, designStyles, type PlacedPiece } from './design.js';
 import { categoryDef } from './catalog.js';
 import { transcribe, hasOpenAI } from './ai/openai.js';
 import { speechAudio, speechUrl } from './ai/speech.js';
@@ -211,6 +212,19 @@ app.post('/api/sessions/:id/layout', (req, res) => {
   const placements = solveLayout(geo, items, { fixed, skipObjectIds: replaced.map((p) => p.id) });
   saveSession({ ...s, placements });
   res.json({ placements, usedDefaultRoom: !s.geometry });
+});
+
+// "Design my room": a styled room (mode "style", with a style key) or the bag arranged (mode "bag"). Planned pieces
+// replace pieces of the same kind already in the room: real furniture is set to "replace" with the design's pick (the
+// headset paints it out and stands the pick in its spot), virtual pieces placed earlier are superseded.
+app.get('/api/design/styles', (_req, res) => res.json({ styles: designStyles() }));
+
+app.post('/api/sessions/:id/design', async (req, res) => {
+  const id = String(req.params.id);
+  need(getSession(id), 'Session');
+  const placed: PlacedPiece[] = Array.isArray(req.body?.placed) ? req.body.placed : [];
+  const r = await designRoom(id, { mode: req.body?.mode === 'bag' ? 'bag' : 'style', style: req.body?.style ? String(req.body.style) : null, placed, user: req.body?.user });
+  res.json({ ...r, session: expandSession(getSession(id)!) });
 });
 
 app.put('/api/sessions/:id/placements', (req, res) => {

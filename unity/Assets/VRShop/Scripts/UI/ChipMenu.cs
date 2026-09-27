@@ -123,6 +123,7 @@ namespace VRShop.UI
                 UIKit.Place(r.button.Label.rectTransform, labelX, 0, bw - labelX - 36, RowH);
                 r.button.SetLabel(string.IsNullOrEmpty(o.count) ? o.label : $"{o.label}  <color={Theme.FaintHex}><size=15>{o.count}</size></color>");
                 r.button.Label.font = Theme.FontFor(o.selected ? Face.SemiBold : Face.Regular);
+                UIKit.OverlayText(r.button.Label);
                 r.swatch.gameObject.SetActive(hasSwatch);
                 r.swatchRing.gameObject.SetActive(hasSwatch);
                 if (hasSwatch) r.swatch.color = o.swatch.Value;
@@ -147,7 +148,7 @@ namespace VRShop.UI
             r.pick?.Invoke();
         }
 
-        class Scrim : MonoBehaviour, IPointerTarget
+        class Scrim : MonoBehaviour, IPointerTarget, IOverlayTarget
         {
             public ChipMenu Menu;
             public void OnHoverEnter(PointerEvent e) { }

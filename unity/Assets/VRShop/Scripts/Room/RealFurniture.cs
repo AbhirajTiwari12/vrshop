@@ -107,8 +107,17 @@ namespace VRShop.Room
 
         public RealPiece PieceOf(FurnitureItem item) => item == null || string.IsNullOrEmpty(item.ReplacesPieceId) ? null : Find(item.ReplacesPieceId);
 
-        /// <summary>Footprints virtual furniture must stay out of: every kept piece.</summary>
-        public List<Obb> Solids() => Pieces.Where(p => p != null && !p.IsReplaced).Select(p => p.Footprint).ToList();
+        /// <summary>
+        /// Footprints virtual furniture must stay out of: every kept piece, except one hanging entirely above a piece
+        /// <paramref name="itemHeight"/> tall (a wall-mounted TV over a TV bench). Mirrors the layout solver.
+        /// </summary>
+        public List<Obb> Solids(float itemHeight = float.PositiveInfinity)
+        {
+            var floorY = RoomService.Instance != null ? RoomService.Instance.FloorY : 0f;
+            return Pieces.Where(p => p != null && !p.IsReplaced && !Above(p, itemHeight, floorY)).Select(p => p.Footprint).ToList();
+        }
+
+        public static bool Above(RealPiece p, float itemHeight, float floorY) => p.Bottom >= floorY + itemHeight + 0.02f;
 
         /// <summary>
         /// Furniture types the room already has: kept pieces, and replaced ones whose replacement stands in their spot.
@@ -156,10 +165,10 @@ namespace VRShop.Room
         }
 
         /// <summary>Nearest spot to <paramref name="desired"/> where a footprint overlaps no kept piece (and, optionally, no placed item).</summary>
-        public Vector3 FreeSpot(Vector3 desired, float w, float d, float yawDeg, FurnitureItem ignore = null, bool avoidItems = false)
+        public Vector3 FreeSpot(Vector3 desired, float w, float d, float yawDeg, FurnitureItem ignore = null, bool avoidItems = false, float h = float.PositiveInfinity)
         {
             var shape = new Obb(desired, w / 2, d / 2, yawDeg);
-            var solids = Solids();
+            var solids = Solids(h);
             if (avoidItems && FurnitureManager.Instance != null)
                 solids.AddRange(FurnitureManager.Instance.Items.Where(i => i != null && i != ignore && i.Dims != null && !i.IsWallMounted && !i.IsFloorLayer && !i.IsResting).Select(i => Obb.Of(i.transform, i.Dims.w, i.Dims.d)));
             return FootprintSolver.TryFindFreeSpot(desired, shape, solids, Walls, Inside(), out var spot) ? spot : FootprintSolver.Resolve(desired, shape, solids, Walls);
@@ -175,7 +184,7 @@ namespace VRShop.Room
                 if (other == null || other == except || other.IsWallMounted || other.IsFloorLayer || other.Dims == null || other.IsResting) continue;
                 var ob = Obb.Of(other.transform, other.Dims.w, other.Dims.d);
                 if (!ob.Overlaps(area)) continue;
-                var blockers = Solids();
+                var blockers = Solids(other.Dims.h);
                 blockers.Add(area);
                 blockers.AddRange(fm.Items.Where(i => i != null && i != other && i != except && i.Dims != null && !i.IsWallMounted && !i.IsFloorLayer && !i.IsResting).Select(i => Obb.Of(i.transform, i.Dims.w, i.Dims.d)));
                 if (FootprintSolver.TryFindFreeSpot(other.transform.position, ob, blockers, Walls, Inside(), out var spot, 2.5f))
@@ -283,6 +292,48 @@ namespace VRShop.Room
             PushItemsOutOf(p.Footprint);
         }
 
+        /// <summary>
+        /// "Design my room" replaced this piece with <paramref name="productId"/>, standing at the planned spot (its
+        /// replacement pose, or slid a little along the wall to clear a neighbour or a doorway). Applied directly, so it
+        /// lands even if a change of the user's is still syncing.
+        /// </summary>
+        public void StandIn(string pieceId, string productId, Vector3 position, float yawDeg)
+        {
+            var p = Find(pieceId);
+            if (p == null || Session?.GetProduct(productId) == null) return;
+            p.Searching = false;
+            p.Message = null;
+            p.PendingUntil = Time.time + 2f; // the server already has it; don't let an older poll undo it
+            if (!p.CandidateIds.Contains(productId)) p.CandidateIds.Insert(0, productId);
+            if (!p.IsReplaced) p.SetReplaced(true);
+            if (p.Replacement == null || p.Replacement.Product.id != productId) ShowCandidate(p, p.CandidateIds.IndexOf(productId));
+            var item = p.Replacement;
+            if (item == null) return;
+            var rot = Quaternion.Euler(0, yawDeg, 0);
+            if ((item.transform.position - position).sqrMagnitude > 0.0009f || Quaternion.Angle(item.transform.rotation, rot) > 3f)
+            {
+                item.UserMoved = true; // stays where the design put it, even once its model's true size is known
+                FurnitureManager.Instance.GlideTo(item, position, rot);
+            }
+            p.RefreshTag();
+        }
+
+        /// <summary>"Design my room" replaced this piece with one standing elsewhere: painted out, nothing in its spot.</summary>
+        public void PaintOut(string pieceId)
+        {
+            var p = Find(pieceId);
+            if (p == null) return;
+            p.Searching = false;
+            p.PendingUntil = Time.time + 2f;
+            if (!p.IsReplaced)
+            {
+                p.SetReplaced(true);
+                Stacking.MoveOnto(Stacking.Carried(p), null); // nothing to stand on any more
+            }
+            p.Message = $"Replaced by the new design. Keep brings your {p.Name} back.";
+            p.RefreshTag();
+        }
+
         /// <summary>"Clear room": every real piece comes back.</summary>
         public void KeepAll()
         {
@@ -293,10 +344,31 @@ namespace VRShop.Room
         {
             if (p == null || p.Searching) return;
             if (p.CandidateIds.Count == 0) { Replace(p); return; }
+            // "Design my room" stood a single pick here: fetch the other size-matched options the first time.
+            if (p.CandidateIds.Count == 1 && p.Replacement != null) { _ = LoadMoreCandidates(p, dir); return; }
             if (!p.IsReplaced) p.SetReplaced(true);
             ShowCandidate(p, p.CandidateIndex + (p.Replacement == null ? 0 : dir));
             m_SyncReplacementAt[p] = Time.time + 0.8f; // tell the server once the user settles on one
             XRInput.Instance?.Haptic(Hand.Right, 0.2f, 0.03f);
+        }
+
+        async Task LoadMoreCandidates(RealPiece p, int dir)
+        {
+            var current = p.Replacement != null ? p.Replacement.Product.id : null;
+            p.Searching = true;
+            p.RefreshTag();
+            try
+            {
+                var res = await Api.ReplacementCandidates(Session.id, p.Id, p.Category);
+                if (p == null) return;
+                StoreCandidates(p, res?.products);
+                if (current != null) { p.CandidateIds.Remove(current); p.CandidateIds.Insert(0, current); }
+            }
+            catch (Exception e) { Debug.LogWarning($"[VRShop] candidates for {p?.Id}: {e.Message}"); }
+            finally { if (p != null) p.Searching = false; }
+            if (p == null) return;
+            if (p.CandidateIds.Count > 1) Cycle(p, dir);
+            else p.RefreshTag();
         }
 
         public async void NextCategory(RealPiece p)
@@ -405,7 +477,7 @@ namespace VRShop.Room
             if (!item.IsFloorLayer && !item.IsResting)
             {
                 var pos = item.transform.position;
-                var resolved = FootprintSolver.Resolve(pos, shape, Solids(), Walls);
+                var resolved = FootprintSolver.Resolve(pos, shape, Solids(item.Dims.h), Walls);
                 if ((resolved - pos).magnitude <= 0.2f) item.transform.position = resolved;
                 PushItemsOutOf(Obb.Of(item.transform, item.Dims.w, item.Dims.d), item);
             }

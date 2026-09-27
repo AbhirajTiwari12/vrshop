@@ -9,7 +9,9 @@ box from the Quest's **Space Setup** (couch, table, bed, storage, lamp, plant...
     it glides to the nearest free spot. Turning an item into it works the same way: it slides clear when you let go
     of the stick. Walls always stop it.
   - New items start in the nearest free spot.
-  - "Design my room" arranges around it, and doesn't suggest a second sofa next to your couch.
+  - "Design my room" arranges around it and never doubles it up: a style design ("Victorian", "Japandi"...) that plans
+    a piece of the same kind and about the same size *replaces* it with its pick, exactly as if chosen on the card (so
+    ‹ › tries other options and Keep brings the real piece back). Pieces the design doesn't plan for stay kept.
   - Virtual items behind it are hidden by it, as before.
 - **Replace**: the real piece is painted out of passthrough, and a product of the same kind and about the same size
   rises in its spot, backed onto the same wall and facing the room.
@@ -86,6 +88,8 @@ Backend API:
 - **`GET /api/sessions/:id/real/:pieceId/candidates?category=&limit=`** returns products of the same type, sized like
   the piece (within 25%, then 40%, then closest), ranked for the room's style. In `DEMO_3D_ONLY` mode, only products
   with official 3D models are included, and the top 5 are downloaded ahead.
+- **`POST /api/sessions/:id/design`** `{ mode: 'style' | 'bag', style, placed, user }` designs the room (see
+  `backend/src/design.ts`); real pieces it replaces come back as `replacedPieces` and are set to `replace` with the pick.
 - **`POST /api/sessions/:id/layout`** accepts `fixed: [{ productId, position, yawDeg, reason }]`. Replaced pieces stop
   being obstacles.
 - **The assistant** has a `replace` action; `/ask` and `/voice` accept `pieceId` (what the user pointed at) and return

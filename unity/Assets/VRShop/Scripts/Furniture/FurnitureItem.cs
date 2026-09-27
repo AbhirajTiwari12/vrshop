@@ -27,6 +27,8 @@ namespace VRShop.Furniture
         public FitState Fit { get; private set; } = FitState.Ok;
         public string FitMessage { get; private set; } = "";
         public bool Selected { get; private set; }
+        /// <summary>Tells pieces of the same product apart (a pair of nightstands) when a design moves or replaces them.</summary>
+        public string InstanceId { get; } = Guid.NewGuid().ToString("N").Substring(0, 12);
         /// <summary>Set when this product stands in for one of the user's real pieces ("replace my couch"). Its info then
         /// shows on the piece's card (RealPieceTag) instead of this item's own tag.</summary>
         public string ReplacesPieceId
@@ -57,6 +59,7 @@ namespace VRShop.Furniture
         BoxCollider m_Collider;
         ItemTag m_Tag;
         bool m_Hover;
+        int m_HoverCount;
         string m_Status = "";
         string m_Note;
 
@@ -242,8 +245,9 @@ namespace VRShop.Furniture
         }
 
         // ------------------------------------------------------------------ pointer
-        public void OnHoverEnter(PointerEvent e) { m_Hover = true; UpdateOutline(); m_Tag.SetVisible(ShowOwnTag); }
-        public void OnHoverExit(PointerEvent e) { m_Hover = false; UpdateOutline(); m_Tag.SetVisible(ShowOwnTag); }
+        // Counted per hand: the other laser sweeping past mustn't hide the tag the first one is showing.
+        public void OnHoverEnter(PointerEvent e) { m_HoverCount++; m_Hover = true; UpdateOutline(); m_Tag.SetVisible(ShowOwnTag); }
+        public void OnHoverExit(PointerEvent e) { m_HoverCount = Mathf.Max(0, m_HoverCount - 1); m_Hover = m_HoverCount > 0; UpdateOutline(); m_Tag.SetVisible(ShowOwnTag); }
         public void OnPress(PointerEvent e) => ManipulationController.Instance?.BeginDrag(this, e);
         public void OnRelease(PointerEvent e, bool clicked) => ManipulationController.Instance?.EndDrag(this, e, clicked);
 

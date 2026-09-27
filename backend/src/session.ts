@@ -10,6 +10,7 @@ import { describeFilters, isEmpty, normalizeFilters } from './inventory/filters.
 import { buildQuote } from './pay/quote.js';
 import { describePieces, findPiece, pieceBox, replacementCandidates, setPiece } from './realFurniture.js';
 import { labelName } from './realPose.js';
+import { designRequest, styleProfile } from './ai/styles.js';
 import { ensureModel } from './models/pipeline.js';
 import { getProduct, getSession, newId, saveSession, upsertProduct } from './store.js';
 import { mapLimit } from './util/http.js';
@@ -322,7 +323,8 @@ export async function setBrowse(id: string, raw: unknown, opts: { live?: boolean
 export interface AskResult {
   transcript: string;
   reply: string;
-  action: Action;
+  action: Action | 'design';
+  style?: string | null;           // design: the style asked for (null = match the room)
   productId?: string;
   atPointer: boolean;
   browse: BrowseResult | undefined;
@@ -334,6 +336,18 @@ export interface AskResult {
 export async function sessionAsk(id: string, text: string, opts: { via?: 'voice' | 'text'; focusProductId?: string; pieceId?: string } = {}): Promise<AskResult> {
   const s = getSession(id);
   if (!s) throw Object.assign(new Error('Session not found'), { status: 404 });
+  // "Design my room in a Victorian style": the headset runs the design (it knows what's placed where). "Replace my
+  // couch with ..." stays with the assistant's replace action.
+  const design = /\b(replace|swap)\b/i.test(text) ? null : designRequest(text);
+  if (design) {
+    const label = styleProfile(design.style)?.label;
+    const reply = label ? `Lovely — let me design it ${label === 'Art Deco' ? 'Art Deco' : label.toLowerCase()}.` : 'Let me design the room for you.';
+    const cur = getSession(id)!;
+    const turns: ChatTurn[] = [{ role: 'user', text, at: Date.now(), via: opts.via ?? 'text' }, { role: 'assistant', text: reply, at: Date.now() }];
+    saveSession({ ...cur, chat: [...(cur.chat ?? []), ...turns].slice(-20) });
+    log.info('assistant', `${id} "${text}" -> design ${design.style ?? '(room style)'}`);
+    return { transcript: text, reply, action: 'design', style: design.style, atPointer: false, browse: s.browse };
+  }
   const prev = s.browse;
   const visible = (prev?.productIds ?? []).slice(0, 8).map((pid) => getProduct(pid)).filter((p): p is Product => !!p);
   const cartTotal = s.cart.reduce((sum, c) => sum + (getProduct(c.productId)?.price ?? 0) * c.qty, 0);

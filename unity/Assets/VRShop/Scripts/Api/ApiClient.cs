@@ -41,6 +41,8 @@ namespace VRShop.Api
         public Task PostGeometry(string id, RoomGeometryDto g) => Send<object>("POST", $"/api/sessions/{id}/geometry", g);
         public Task<LayoutResponse> Layout(string id, List<string> productIds, UserDto user, List<FixedPlacement> fixedPlacements = null) =>
             Send<LayoutResponse>("POST", $"/api/sessions/{id}/layout", new { productIds, user, @fixed = fixedPlacements ?? new List<FixedPlacement>() }, 20);
+        public Task<DesignResponse> Design(string id, string mode, string style, List<PlacedPieceDto> placed, UserDto user) => Send<DesignResponse>("POST", $"/api/sessions/{id}/design", new { mode, style, placed, user }, 90);
+        public Task<DesignStylesResponse> DesignStyles() => Send<DesignStylesResponse>("GET", "/api/design/styles", null, 10);
         public Task PutPlacements(string id, List<Placement> placements) => Send<object>("PUT", $"/api/sessions/{id}/placements", new { placements });
         public Task<Session> SetCart(string id, string productId, int qty) => Send<Session>("POST", $"/api/sessions/{id}/cart", new { productId, qty });
         public Task<Product> EnsureModel(string productId, bool generate = true) => Send<Product>("POST", $"/api/products/{productId}/model", new { generate });

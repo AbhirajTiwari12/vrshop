@@ -55,6 +55,14 @@ export function ensureModel(productId: string, opts: { allowGenerate?: boolean; 
   return getProduct(productId)!.model;
 }
 
+/** Resolve once every product's model is ready or failed (or the time is up): design waits so it can lay out
+ *  pieces at the size of their real 3D models instead of category guesses. */
+export async function waitForModels(ids: string[], timeoutMs: number): Promise<void> {
+  const until = Date.now() + timeoutMs;
+  const busy = () => ids.some((id) => { const st = getProduct(id)?.model.status; return st === 'queued' || st === 'processing'; });
+  while (busy() && Date.now() < until) await new Promise((r) => setTimeout(r, 250));
+}
+
 function pump() {
   for (let i = 0; i < queue.length; i++) {
     const job = queue[i];

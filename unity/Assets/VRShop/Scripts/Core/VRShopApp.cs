@@ -107,6 +107,7 @@ namespace VRShop.Core
         {
             RoomService.Instance.OnReady += () => { m_GeometrySent = false; _ = SendGeometry(); };
             await Connect();
+            LoadDesignStyles();
             await LoadSession();
             if (RoomService.Instance.Ready) _ = SendGeometry();
             PollLoop();
@@ -247,53 +248,95 @@ namespace VRShop.Core
             catch (Exception e) { m_GeometrySent = false; Debug.LogWarning($"[VRShop] geometry upload: {e.Message}"); }
         }
 
-        /// <summary>
-        /// AI "Design my room": lays out the cart (or, if empty, the top pick of each recommended category)
-        /// in the real room using the headset's walls + furniture, then animates every piece into place.
-        /// </summary>
-        public async void DesignMyRoom()
-        {
-            if (Session == null) return;
-            // Real furniture the user keeps is part of the design: don't suggest a second sofa next to their couch.
-            var real = RealFurniture.Instance;
-            var kept = real != null ? real.CoveredCategories() : new HashSet<string>();
-            var ids = Session.cart != null && Session.cart.Count > 0
-                ? Session.cart.Select(c => c.productId).ToList()
-                : Session.categories.Where(c => c.origin == "analysis" && c.productIds.Count > 0 && !kept.Contains(c.category))
-                    // Themed rows lead with the themed product (usually a store listing without a 3D model); others prefer 3D.
-                    .Select(c => c.theme != null && c.theme.Count > 0 ? c.productIds[0] : c.productIds.FirstOrDefault(id => Session.GetProduct(id)?.model?.kind == "official") ?? c.productIds[0])
-                    .Take(7).ToList();
-            // Include what is already placed so the layout accounts for it.
-            foreach (var it in FurnitureManager.Instance.Items)
-                if (!ids.Contains(it.Product.id)) ids.Add(it.Product.id);
-            var orb = AssistantOrb.Instance;
-            if (ids.Count == 0) { orb?.Notify("There's nothing to arrange yet — add a few pieces first."); return; }
+        /// <summary>The styles "Design my room" offers (from the server; a built-in copy until it answers).</summary>
+        public List<DesignStyle> DesignStyles { get; private set; } = DefaultStyles();
 
-            orb?.Think("Arranging your room…");
+        static List<DesignStyle> DefaultStyles()
+        {
+            DesignStyle S(string key, string label, string blurb, params string[] sw) => new DesignStyle { key = key, label = label, blurb = blurb, swatches = sw.ToList() };
+            return new List<DesignStyle>
+            {
+                S("modern", "Modern", "Clean lines, soft neutrals, a little metal", "#2B2B2B", "#B9BDC1", "#F2F1EE"),
+                S("victorian", "Victorian", "Dark woods, velvet, wingbacks, gilt", "#5B1F24", "#2F4A3A", "#B08A4A"),
+                S("scandinavian", "Scandinavian", "Light oak, white, wool and linen", "#F4F1EA", "#D8C6A6", "#9A9A9A"),
+                S("mid-century", "Mid-century", "Walnut, tapered legs, mustard and teal", "#7A4A2A", "#C9962F", "#2E6A6A"),
+                S("industrial", "Industrial", "Black steel, raw wood, worn leather", "#1F1F1F", "#6B4A33", "#8A8C8E"),
+                S("japandi", "Japandi", "Low, calm, natural wood and linen", "#E6DCCB", "#8B6B4A", "#2A2724"),
+                S("boho", "Boho", "Rattan, jute, plants and pattern", "#C46A3C", "#D9B44A", "#5E7B5A"),
+                S("coastal", "Coastal", "Whites, sea blues, linen and light wood", "#F7F5F0", "#7FA3C0", "#D8C6A6"),
+                S("farmhouse", "Farmhouse", "Warm wood, white paint, cozy textures", "#F4EFE6", "#9C7652", "#2B2B2B"),
+                S("glam", "Art Deco", "Velvet, brass, marble, bold geometry", "#1F4D3A", "#B8934A", "#1C1C24"),
+                S("minimalist", "Minimalist", "Fewer, simpler pieces in quiet tones", "#FFFFFF", "#C9C9C9", "#1E1E1E"),
+                S("traditional", "Traditional", "Classic shapes, warm wood, rolled arms", "#1F3050", "#E9E0CF", "#8A6A48"),
+            };
+        }
+
+        async void LoadDesignStyles()
+        {
+            try
+            {
+                var r = await Api.DesignStyles();
+                if (r?.styles != null && r.styles.Count > 0) DesignStyles = r.styles;
+            }
+            catch (Exception e) { Debug.LogWarning($"[VRShop] design styles: {e.Message}"); }
+        }
+
+        bool m_Designing;
+
+        /// <summary>
+        /// AI "Design my room" in a style (empty = the room's own style), or with <paramref name="bag"/> the pieces in the bag.
+        /// The server picks real pieces that suit the room and each other and lays them out in the real room. Anything of
+        /// the same kind already there is replaced, never doubled up: a real piece (a couch from Space Setup) is set to
+        /// "replace" with the design's pick, exactly as if chosen on its card, and a virtual piece placed earlier is removed.
+        /// </summary>
+        public async void DesignMyRoom(string style = null, bool bag = false, string heard = null)
+        {
+            if (Session == null || m_Designing) return;
+            var orb = AssistantOrb.Instance;
+            if (bag && (Session.cart == null || Session.cart.Count == 0)) { orb?.Notify("Your bag is empty — add a few pieces first."); return; }
+            var styleName = DesignStyles.FirstOrDefault(x => x.key == style)?.label;
+            m_Designing = true;
+            orb?.Think(bag ? "Arranging your bag…" : styleName != null ? $"Designing a {styleName} room…" : "Designing your room…", heard);
             CatalogPanel.Instance?.Hide();
             try
             {
                 await SendGeometry();
                 var head = XRInput.Instance.Head;
                 var user = new UserDto { position = new Vec3(head.position), forward = new Vec3(Vector3.ProjectOnPlane(head.forward, Vector3.up).normalized) };
-                // Replacements stay in their real piece's spot; everything else arranges around them.
-                var res = await Api.Layout(Session.id, ids, user, real != null ? real.FixedPlacements() : null);
-                FurnitureManager.Instance.ApplyLayout(res.placements, Session);
-                var n = res.placements.Count;
-                var why = res.placements.Select(p => p.reason).FirstOrDefault(r => !string.IsNullOrEmpty(r) && !r.StartsWith("in place of"));
-                var line = $"Here's a first layout: {n} piece{(n == 1 ? "" : "s")}, arranged around your space.";
-                var keptNames = real != null ? real.KeptNames() : new List<string>();
-                if (keptNames.Count > 0) line += $" I kept your {Join(keptNames)} and designed around {(keptNames.Count == 1 ? "it" : "them")}.";
-                if (!string.IsNullOrEmpty(why)) line += $" {char.ToUpper(why[0])}{why.Substring(1).TrimEnd('.')}.";
-                if (res.usedDefaultRoom) line += " I used a standard room — run Space Setup on the headset so I can use yours.";
+                var res = await Api.Design(Session.id, bag ? "bag" : "style", style, FurnitureManager.Instance.CurrentPieces(), user);
+                // The session now marks the real pieces the design replaces: RealFurniture paints them out and stands the
+                // new pieces in their spots as it syncs. Everything else glides into place.
+                if (res.session != null) SetSession(res.session);
+                FurnitureManager.Instance.ApplyDesign(res, Session);
+                if (!bag) CatalogPanel.Instance?.FocusQuietly("design");
+                var line = DesignLine(res);
                 if (orb != null) orb.Say(line);
-                else Toast.Show(line, 7);
+                else Toast.Show(line, 8);
             }
             catch (Exception e)
             {
-                if (orb != null) orb.Fail($"I couldn't arrange the room: {e.Message}");
-                else Toast.Show($"Layout failed: {e.Message}", 5);
+                if (orb != null) orb.Fail($"I couldn't design the room: {e.Message}");
+                else Toast.Show($"Design failed: {e.Message}", 5);
             }
+            finally { m_Designing = false; }
+        }
+
+        /// <summary>What the designer says after a design: the look, what was swapped out, what stayed, what didn't fit.</summary>
+        static string DesignLine(DesignResponse r)
+        {
+            var n = r.placements.Count;
+            var parts = new List<string>();
+            if (r.mode == "bag") parts.Add($"Here's your bag, arranged: {n} piece{(n == 1 ? "" : "s")}.");
+            else if (!string.IsNullOrEmpty(r.concept)) parts.Add(r.concept.TrimEnd('.') + ".");
+            else parts.Add($"Here's a {r.styleLabel} room: {n} pieces.");
+            if (r.replacedLabels != null && r.replacedLabels.Count > 0) parts.Add($"I swapped out {Join(r.replacedLabels.Take(3).ToList())}.");
+            // Real furniture the user keeps is part of the design.
+            var kept = RealFurniture.Instance != null ? RealFurniture.Instance.KeptNames().Where(x => x != "piece").Take(3).ToList() : new List<string>();
+            if (kept.Count > 0) parts.Add($"I kept your {Join(kept)} and designed around {(kept.Count == 1 ? "it" : "them")}.");
+            if (r.skipped != null && r.skipped.Count > 0)
+                parts.Add($"I left out the {Join(r.skipped.Select(x => x.label.ToLower()).Distinct().Take(2).ToList())} — there wasn't room.");
+            if (r.usedDefaultRoom) parts.Add("I used a standard room — run Space Setup so I can use yours.");
+            return string.Join(" ", parts);
         }
     }
 }

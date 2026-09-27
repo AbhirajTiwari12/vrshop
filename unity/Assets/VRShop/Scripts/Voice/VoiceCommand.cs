@@ -156,8 +156,14 @@ namespace VRShop.Voice
                 var res = await app.Api.Voice(app.Session.id, wav, CatalogPanel.Instance?.FocusedProductId, m_PointedPiece);
                 if (!string.IsNullOrEmpty(res.error)) { Orb?.Fail(res.error); return; }
                 if (string.IsNullOrEmpty(res.transcript)) { Orb?.Notify("Sorry, I didn't catch that. Try again?"); return; }
-                Orb?.Respond(res.transcript, res.reply, res.speechUrl);
                 if (res.session != null) app.SetSession(res.session);
+                if (res.action == "design")
+                {
+                    // "Design my room in a Victorian style": the designer describes the finished room when it's done.
+                    app.DesignMyRoom(res.style, false, res.transcript);
+                    return;
+                }
+                Orb?.Respond(res.transcript, res.reply, res.speechUrl);
                 if (res.atPointer && m_PointedAt.HasValue && FurnitureManager.Instance != null) FurnitureManager.Instance.PendingPoint = m_PointedAt;
                 var target = string.IsNullOrEmpty(res.productId) ? null : app.Session?.GetProduct(res.productId);
                 switch (res.action)

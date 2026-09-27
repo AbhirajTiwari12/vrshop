@@ -182,7 +182,7 @@ export interface CategoryResult {
   why: string;
   placement: Recommendation['placement'];
   productIds: string[];
-  origin: 'analysis' | 'voice' | 'search';
+  origin: 'analysis' | 'voice' | 'search' | 'design';
   theme?: string[];                // set when these products carry a theme (found in stores if the catalog had none)
 }
 

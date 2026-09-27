@@ -78,7 +78,7 @@ namespace VRShop.Furniture
             if (!position.HasValue && !onTop && !isWall && p.category != "rug" && RealFurniture.Instance != null)
             {
                 var d = p.dims ?? new Dims { w = 0.6f, d = 0.6f, h = 0.6f };
-                pos = RealFurniture.Instance.FreeSpot(pos, d.w, d.d, yaw, null, true);
+                pos = RealFurniture.Instance.FreeSpot(pos, d.w, d.d, yaw, null, true, d.h);
             }
             if (isWall && !position.HasValue && room != null)
             {
@@ -142,20 +142,21 @@ namespace VRShop.Furniture
         async Task LoadModel(FurnitureItem item)
         {
             var p = item.Product;
+            var id = p.id;
             try
             {
                 // Not ready yet, or only a stand-in: ask the backend for the best model (IKEA official or AI-generated).
                 if (!p.model.IsReady || p.model.kind == "standin")
                 {
                     item.SetStatus("Preparing 3D model…");
-                    p = await Api.EnsureModel(p.id, true);
+                    p = await Api.EnsureModel(id, true) ?? item.Product;
                     var started = Time.realtimeSinceStartup;
                     while (item != null && p.model.status != "ready" && p.model.status != "failed" && Time.realtimeSinceStartup - started < 600)
                     {
                         item.SetStatus($"{p.model.message ?? "Preparing 3D"}  {Mathf.RoundToInt(p.model.progress * 100)}%");
                         await Task.Delay(1500);
                         if (item == null) return;
-                        p = await Api.GetProduct(p.id);
+                        p = await Api.GetProduct(id) ?? p;
                     }
                     if (item == null) return;
                     VRShopApp.Instance.UpdateProduct(p);
@@ -174,7 +175,7 @@ namespace VRShop.Furniture
             }
             catch (Exception e)
             {
-                Debug.LogWarning($"[VRShop] model for {p.id}: {e.Message}");
+                Debug.LogWarning($"[VRShop] model for {id}: {e.Message}");
                 if (item != null) item.SetStatus("3D model error — showing true-size box");
             }
         }
@@ -202,18 +203,54 @@ namespace VRShop.Furniture
             ScheduleSync();
         }
 
-        /// <summary>"Design my room": move existing items / spawn new ones into the solver's placements, animated.</summary>
-        public void ApplyLayout(List<Placement> placements, Session session)
+        /// <summary>Everything standing in the room, for "Design my room" to replace or work around.</summary>
+        public List<PlacedPieceDto> CurrentPieces() => Items.Where(i => i != null).Select(i => new PlacedPieceDto
+        {
+            instanceId = i.InstanceId,
+            productId = i.Product.id,
+            category = i.Product.category,
+            position = new Vec3(i.transform.position),
+            yawDeg = i.transform.eulerAngles.y,
+            dims = i.Dims,
+            replacesPieceId = i.ReplacesPieceId,
+        }).ToList();
+
+        /// <summary>
+        /// "Design my room": pieces the design supersedes leave, the rest glide into the solver's placements. New pieces
+        /// that stand in for the user's real furniture arrive through RealFurniture: the session now marks those pieces
+        /// "replace" with the design's pick, and its sync paints them out and stands the pick in their spot.
+        /// </summary>
+        public void ApplyDesign(DesignResponse design, Session session)
+        {
+            var gone = new HashSet<string>(design.remove ?? new List<string>());
+            foreach (var item in Items.Where(x => x != null && gone.Contains(x.InstanceId)).ToList()) Remove(item);
+            var real = RealFurniture.Instance;
+            if (real != null)
+            {
+                foreach (var pl in design.placements.Where(p => !string.IsNullOrEmpty(p.replacesPieceId)))
+                    real.StandIn(pl.replacesPieceId, pl.productId, pl.position.ToVector3(), pl.yawDeg);
+                foreach (var id in design.replacedPieces ?? new List<string>())
+                    if (!design.placements.Any(p => p.replacesPieceId == id)) real.PaintOut(id);
+            }
+            ApplyLayout(design.placements.Where(p => string.IsNullOrEmpty(p.replacesPieceId)).ToList(), session, false);
+        }
+
+        /// <summary>"Design my room": move existing items / spawn new ones into the solver's placements, animated.
+        /// A placement naming an instance moves that piece; otherwise one of the same product is reused (a replacement
+        /// standing in for a real piece only when <paramref name="matchReplacements"/>).</summary>
+        public void ApplyLayout(List<Placement> placements, Session session, bool matchReplacements = true)
         {
             var used = new HashSet<FurnitureItem>();
             var i = 0;
+            bool Candidate(FurnitureItem x) => x != null && (matchReplacements || string.IsNullOrEmpty(x.ReplacesPieceId));
             // Things moving between tops travel on their own; they re-settle on whatever top they land on at the end.
-            foreach (var it in Items) if (it != null && placements.Any(pl => pl.productId == it.Product.id)) Stacking.LiftOff(it);
+            foreach (var it in Items) if (Candidate(it) && placements.Any(pl => pl.instanceId == it.InstanceId || pl.productId == it.Product.id)) Stacking.LiftOff(it);
             foreach (var pl in placements)
             {
                 var target = pl.position.ToVector3();
                 var rot = Quaternion.Euler(0, pl.yawDeg, 0);
-                var item = Items.FirstOrDefault(x => !used.Contains(x) && x.Product.id == pl.productId);
+                var item = (string.IsNullOrEmpty(pl.instanceId) ? null : Items.FirstOrDefault(x => x != null && !used.Contains(x) && x.InstanceId == pl.instanceId))
+                           ?? Items.FirstOrDefault(x => Candidate(x) && !used.Contains(x) && x.Product.id == pl.productId);
                 if (item == null)
                 {
                     var p = session.GetProduct(pl.productId);
@@ -233,20 +270,24 @@ namespace VRShop.Furniture
             ScheduleSync();
         }
 
-        /// <summary>Once everything has landed, lamps and plants placed on tables stand on them (and move with them).</summary>
+        /// <summary>
+        /// Once everything has landed, lamps and plants placed on tables stand on them (and move with them), and every
+        /// piece is fit-checked again: each was checked when its own glide ended, while others were still in the air.
+        /// </summary>
         IEnumerator SettleAfter(float seconds)
         {
             yield return new WaitForSeconds(seconds);
             var floorY = RoomService.Instance != null ? RoomService.Instance.FloorY : 0f;
             foreach (var it in Items.ToList())
                 if (it != null && !it.IsWallMounted && it.transform.position.y > floorY + 0.05f) Stacking.Settle(it);
+            foreach (var it in Items.ToList()) if (it != null) ManipulationController.Instance?.CheckFit(it);
         }
 
-        /// <summary>Slide an item to a new spot (making room for something), keeping its rotation.</summary>
-        public void GlideTo(FurnitureItem item, Vector3 target)
+        /// <summary>Slide an item to a new spot (making room for something), keeping its rotation unless given one.</summary>
+        public void GlideTo(FurnitureItem item, Vector3 target, Quaternion? rotation = null)
         {
             if (item == null) return;
-            StartCoroutine(Glide(item, target, item.transform.rotation, 0f));
+            StartCoroutine(Glide(item, target, rotation ?? item.transform.rotation, 0f));
             ScheduleSync();
         }
 

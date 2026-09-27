@@ -7,8 +7,8 @@ namespace VRShop.UI
 {
     /// <summary>
     /// Small lazy-follow notice for quick confirmations ("Added to your bag", "Cleared 3 items"). Conversation
-    /// with the designer goes through the AssistantOrb instead; this sits low and slightly right so the two never
-    /// cover each other.
+    /// with the designer goes through the AssistantOrb instead; the orb sits low and centered with its caption to the
+    /// right, so this sits low and to the left and the two never cover each other.
     /// </summary>
     public class Toast : MonoBehaviour
     {
@@ -28,7 +28,7 @@ namespace VRShop.UI
         void Awake()
         {
             Instance = this;
-            var canvas = UIKit.CreateCanvas("ToastCanvas", new Vector2(W, CanvasH), 0.0005f);
+            var canvas = UIKit.CreateCanvas("ToastCanvas", new Vector2(W, CanvasH), 0.0005f, UIKit.OrderToast);
             canvas.transform.SetParent(transform, false);
             m_Group = canvas.gameObject.AddComponent<CanvasGroup>();
             m_Shadow = UIKit.Shadow(canvas.transform, "Shadow", 0, 0, W, MinH, 22, 0.2f, 6);
@@ -63,14 +63,15 @@ namespace VRShop.UI
             m_Group.alpha = Mathf.MoveTowards(m_Group.alpha, visible ? 1 : 0, Time.deltaTime * 4);
             var head = XRInput.Instance != null ? XRInput.Instance.Head : (Camera.main != null ? Camera.main.transform : null);
             if (head == null) return;
-            // Lazy follow: ~0.8 m ahead, low and a little right of center.
+            // Lazy follow: ~0.8 m ahead, low and left of center (the designer orb is in the middle).
             var fwd = Vector3.ProjectOnPlane(head.forward, Vector3.up).normalized;
             if (fwd.sqrMagnitude < 0.01f) fwd = Vector3.forward;
             var right = Vector3.Cross(Vector3.up, fwd);
-            var target = head.position + fwd * 0.78f + right * 0.12f + Vector3.down * 0.27f;
+            var target = head.position + fwd * 0.78f - right * 0.22f + Vector3.down * 0.32f;
             var k = 1 - Mathf.Exp(-Time.deltaTime * 4);
             transform.position = Vector3.Lerp(transform.position, target, k);
-            transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(transform.position - head.position, Vector3.up), k);
+            var look = transform.position - head.position;
+            if (look.sqrMagnitude > 1e-4f) transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(look, Vector3.up), k);
         }
     }
 }

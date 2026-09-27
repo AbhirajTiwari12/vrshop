@@ -273,8 +273,10 @@ namespace VRShop.Room
         }
 
         // ------------------------------------------------------------------ pointer
-        public void OnHoverEnter(PointerEvent e) { Hovered = true; ApplyVisibility(); }
-        public void OnHoverExit(PointerEvent e) { Hovered = false; ApplyVisibility(); }
+        // Counted per hand: the other laser sweeping past mustn't hide the card the first one is showing.
+        int m_HoverCount;
+        public void OnHoverEnter(PointerEvent e) { m_HoverCount++; Hovered = true; ApplyVisibility(); }
+        public void OnHoverExit(PointerEvent e) { m_HoverCount = Mathf.Max(0, m_HoverCount - 1); Hovered = m_HoverCount > 0; ApplyVisibility(); }
         public void OnPress(PointerEvent e) { }
         public void OnRelease(PointerEvent e, bool clicked)
         {

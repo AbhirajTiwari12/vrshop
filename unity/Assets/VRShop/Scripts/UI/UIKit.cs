@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.UI;
 using VRShop.Input;
 using VRShop.Interaction;
@@ -65,11 +67,16 @@ namespace VRShop.UI
             return Sprite.Create(tex, new Rect(0, 0, n, n), new Vector2(0.5f, 0.5f), 100, 0, SpriteMeshType.FullRect, new Vector4(border, border, border, border));
         }
 
-        public static Canvas CreateCanvas(string name, Vector2 sizePx, float metersPerPx)
+        // Draw order between canvases (all UI ignores depth, see Overlay): furniture cards under the catalog, the
+        // designer and its speech bubble over it, toasts on top.
+        public const int OrderCard = 0, OrderCatalog = 10, OrderOrb = 20, OrderToast = 30;
+
+        public static Canvas CreateCanvas(string name, Vector2 sizePx, float metersPerPx, int sortingOrder = OrderCard)
         {
             var go = new GameObject(name, typeof(RectTransform), typeof(Canvas));
             var canvas = go.GetComponent<Canvas>();
             canvas.renderMode = RenderMode.WorldSpace;
+            canvas.sortingOrder = sortingOrder;
             var rt = (RectTransform)go.transform;
             rt.sizeDelta = sizePx;
             rt.pivot = new Vector2(0.5f, 0.5f);
@@ -77,6 +84,41 @@ namespace VRShop.UI
             var scaler = go.AddComponent<CanvasScaler>();
             scaler.dynamicPixelsPerUnit = 2;
             return canvas;
+        }
+
+        static Material s_OverlayUI;
+        static readonly Dictionary<Material, Material> s_OverlayText = new Dictionary<Material, Material>();
+
+        /// <summary>
+        /// UI draws over the room instead of being depth-tested against it. The walls and the user's real furniture are
+        /// invisible depth-only occluders, so a panel that follows the head used to vanish (often in one eye first) as
+        /// soon as the user stood near a wall or a tall piece, or walked up to a piece of virtual furniture.
+        /// </summary>
+        public static void Overlay(Graphic g)
+        {
+            if (g == null) return;
+            if (g is TMP_Text t) { OverlayText(t); return; }
+            if (s_OverlayUI == null)
+            {
+                s_OverlayUI = new Material(Canvas.GetDefaultCanvasMaterial()) { name = "UI (overlay)" };
+                s_OverlayUI.SetInt("unity_GUIZTestMode", (int)CompareFunction.Always);
+            }
+            g.material = s_OverlayUI;
+        }
+
+        /// <summary>Overlay for text; call again after changing a label's font.</summary>
+        public static void OverlayText(TMP_Text t)
+        {
+            var src = t != null ? t.fontSharedMaterial : null;
+            if (src == null) return;
+            if (!s_OverlayText.TryGetValue(src, out var m))
+            {
+                m = new Material(src) { name = src.name + " (overlay)" };
+                m.SetInt("unity_GUIZTestMode", (int)CompareFunction.Always);
+                s_OverlayText[src] = m;
+                s_OverlayText[m] = m;
+            }
+            if (t.fontSharedMaterial != m) t.fontSharedMaterial = m;
         }
 
         /// <summary>Create a child RectTransform positioned in pixels from the parent's top-left corner.</summary>
@@ -117,6 +159,7 @@ namespace VRShop.UI
             var img = rt.gameObject.AddComponent<Image>();
             img.color = color;
             img.raycastTarget = false;
+            Overlay(img);
             SetRadius(img, radius);
             return img;
         }
@@ -139,6 +182,7 @@ namespace VRShop.UI
             img.pixelsPerUnitMultiplier = k_ShadowInset / spread;
             img.color = new Color(0.16f, 0.12f, 0.08f, alpha);
             img.raycastTarget = false;
+            Overlay(img);
             return img;
         }
 
@@ -149,6 +193,7 @@ namespace VRShop.UI
             img.sprite = Circle;
             img.color = color;
             img.raycastTarget = false;
+            Overlay(img);
             return img;
         }
 
@@ -170,6 +215,7 @@ namespace VRShop.UI
             t.textWrappingMode = TextWrappingModes.Normal;
             t.overflowMode = TextOverflowModes.Ellipsis;
             t.raycastTarget = false;
+            OverlayText(t);
             return t;
         }
 
@@ -190,6 +236,7 @@ namespace VRShop.UI
             var img = rt.gameObject.AddComponent<RawImage>();
             img.color = Theme.Canvas; // placeholder until the texture arrives
             img.raycastTarget = false;
+            Overlay(img);
             return img;
         }
 
@@ -287,21 +334,54 @@ namespace VRShop.UI
         /// <summary>Server text may contain '&lt;' (e.g. "&lt;= budget"): keep TMP from reading it as a tag.</summary>
         public static string Plain(string t) => string.IsNullOrEmpty(t) ? "" : t.Replace("<", "‹").Replace(">", "›");
 
-        /// <summary>Place a panel in front of the head, pulled closer if a real wall is in the way.</summary>
-        public static void PlaceInFront(Transform panel, float distance, float drop, float maxWallGap = 0.12f)
+        /// <summary>
+        /// Place a panel in front of the head, pulled closer if a wall or a piece of real furniture is in the way (checked
+        /// across the panel's width, so a corner doesn't slice its edge). With too little room ahead it turns toward the
+        /// most open direction instead of sitting inside the wall, where the laser couldn't reach it.
+        /// </summary>
+        public static void PlaceInFront(Transform panel, float distance, float drop, float maxWallGap = 0.12f, float halfWidth = 0.5f)
         {
             var head = XRInput.Instance != null ? XRInput.Instance.Head : Camera.main.transform;
             var fwd = Vector3.ProjectOnPlane(head.forward, Vector3.up);
             if (fwd.sqrMagnitude < 0.01f) fwd = Vector3.forward;
             fwd.Normalize();
-            var hits = Physics.RaycastAll(new Ray(head.position, fwd), distance + 0.3f, ~0, QueryTriggerInteraction.Ignore);
-            foreach (var h in hits)
+            const float minDistance = 0.4f;
+            var room = Clearance(head.position, fwd, distance, halfWidth);
+            if (room < minDistance + maxWallGap)
             {
-                if (h.collider.TryGetComponent<RoomSurface>(out var s) && s.kind == SurfaceKind.Wall)
-                    distance = Mathf.Min(distance, Mathf.Max(0.45f, h.distance - maxWallGap));
+                // Facing a wall up close: the most open direction within ±70 degrees.
+                var bestRoom = room;
+                for (var a = -70; a <= 70; a += 10)
+                {
+                    if (a == 0) continue;
+                    var dir = Quaternion.Euler(0, a, 0) * fwd;
+                    var r = Clearance(head.position, dir, distance, halfWidth) - Mathf.Abs(a) * 0.002f;
+                    if (r > bestRoom + 0.05f) { bestRoom = r; fwd = dir; }
+                }
+                room = Clearance(head.position, fwd, distance, halfWidth);
             }
+            distance = Mathf.Clamp(room - maxWallGap, minDistance, distance);
             panel.position = head.position + fwd * distance + Vector3.down * drop;
             panel.rotation = Quaternion.LookRotation(fwd, Vector3.up);
+        }
+
+        /// <summary>Free distance ahead (up to <paramref name="distance"/>) before a wall or real furniture, across a panel's width.</summary>
+        static float Clearance(Vector3 from, Vector3 fwd, float distance, float halfWidth)
+        {
+            var right = Vector3.Cross(Vector3.up, fwd).normalized;
+            var free = distance + 1f;
+            foreach (var side in new[] { 0f, -1f, 1f })
+            {
+                var origin = from + right * (side * halfWidth * 0.9f);
+                foreach (var h in Physics.RaycastAll(new Ray(origin, fwd), distance + 0.3f, ~0, QueryTriggerInteraction.Ignore))
+                {
+                    if (!h.collider.TryGetComponent<RoomSurface>(out var s) || s.kind == SurfaceKind.Floor) continue;
+                    // Real furniture only blocks if it reaches up to the panel (a coffee table doesn't).
+                    if (s.kind == SurfaceKind.Object && h.collider.bounds.max.y < from.y - 0.55f) continue;
+                    free = Mathf.Min(free, h.distance);
+                }
+            }
+            return free;
         }
     }
 

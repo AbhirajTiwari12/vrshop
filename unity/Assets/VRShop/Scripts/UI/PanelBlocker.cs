@@ -4,7 +4,7 @@ using VRShop.Interaction;
 namespace VRShop.UI
 {
     /// <summary>Catches laser hits on empty panel space so they don't fall through to furniture or the floor.</summary>
-    public class PanelBlocker : MonoBehaviour, IPointerTarget
+    public class PanelBlocker : MonoBehaviour, IPointerTarget, IOverlayTarget
     {
         public static void Add(GameObject go, float widthPx, float heightPx)
         {

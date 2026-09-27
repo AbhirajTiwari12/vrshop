@@ -11,7 +11,7 @@ namespace VRShop.UI
     /// A laser-clickable UI button (trigger collider sized to its rect) with hover / pressed / selected / disabled
     /// looks. Cards set HoverLift so they rise toward the viewer and grow slightly when pointed at.
     /// </summary>
-    public class UIButton : MonoBehaviour, IPointerTarget
+    public class UIButton : MonoBehaviour, IPointerTarget, IOverlayTarget
     {
         public Image Background { get; private set; }
         public TextMeshProUGUI Label { get; private set; }

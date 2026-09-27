@@ -80,8 +80,8 @@ export interface WallLike { center: Vec3; normal: Vec3; width: number }
 export interface Pose { position: Vec3; yawDeg: number; againstWall: boolean }
 
 /**
- * Where a replacement product stands so it reads as "the new one in the old one's place": its width runs along the
- * piece's long side; if the piece backs onto a wall, the product's back goes against that same wall and it faces
+ * Where a replacement product stands so it reads as "the new one in the old one's place": its long side runs along the
+ * piece's long side (a sofa's width, a bed's length); if the piece backs onto a wall, the product's back goes against that same wall and it faces
  * into the room; otherwise it's centered on the piece, facing the room. Pieces raised off the floor (a lamp on a
  * table) keep their height.
  */
@@ -91,9 +91,12 @@ export function replacementPose(box: RoomObject, dims: Dims, walls: WallLike[], 
   const c = v(box.center.x, box.center.z);
   const longIsX = box.size.x >= box.size.z;
   const ratio = Math.max(box.size.x, box.size.z) / Math.max(Math.min(box.size.x, box.size.z), 0.01);
-  // Front/back axis = across the short side; square-ish pieces may face either way, so try both axes.
-  const axes = ratio < 1.15 ? [{ n: longIsX ? f : r, half: (longIsX ? box.size.z : box.size.x) / 2 }, { n: longIsX ? r : f, half: (longIsX ? box.size.x : box.size.z) / 2 }]
-    : [{ n: longIsX ? f : r, half: (longIsX ? box.size.z : box.size.x) / 2 }];
+  // Front/back axis = across the short side for a wide piece (a sofa), along the long side for a deep one (a bed runs
+  // head to foot); square-ish pieces may face either way, so try both axes.
+  const across = { n: longIsX ? f : r, half: (longIsX ? box.size.z : box.size.x) / 2 };
+  const along = { n: longIsX ? r : f, half: (longIsX ? box.size.x : box.size.z) / 2 };
+  const deep = dims.d > dims.w * 1.1;
+  const axes = ratio < 1.15 ? [across, along] : deep ? [along] : [across];
 
   let front: V2 | null = null, half = axes[0].half, best = Infinity;
   for (const ax of axes) {

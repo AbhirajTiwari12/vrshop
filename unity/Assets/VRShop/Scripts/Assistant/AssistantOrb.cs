@@ -13,22 +13,27 @@ namespace VRShop.Assistant
     public enum OrbState { Idle, Listening, Thinking, Speaking }
 
     /// <summary>
-    /// The designer, in the room with you: a small pearl-and-brass orb that floats at the lower left of your view
-    /// and talks back. It breathes while idle, ripples with your voice while listening, spins a brass arc while
+    /// The designer, in the room with you: a small pearl-and-brass orb that hangs from the middle of the catalog's bottom
+    /// edge (or, with the catalog closed, floats low and centered in your view) and talks back. It breathes while idle, ripples with your voice while listening, spins a brass arc while
     /// thinking, and pulses with its own voice while speaking (spoken replies come from the backend's text to speech
-    /// and play from the orb's position). A caption bubble beside it shows what it heard and what it says.
+    /// and play from the orb's position). A caption bubble to its right, dropping below the catalog so it never covers
+    /// a button, shows what it heard and what it says.
     /// Point at it and pull the trigger to talk (or hold X).
     /// </summary>
-    public class AssistantOrb : MonoBehaviour, IPointerTarget
+    public class AssistantOrb : MonoBehaviour, IPointerTarget, IOverlayTarget
     {
         public static AssistantOrb Instance { get; private set; }
         public OrbState State { get; private set; }
 
         const float OrbPx = 320, OrbScale = 0.0005f, CoreSize = 112;
         const float BubbleW = 580, BubbleCanvasH = 420, BubbleScale = 0.0005f, Pad = 26;
+        const float TailY = 40;           // px from the bubble's top to its tail (level with the orb's center)
 
-        // Where the orb rests relative to your head (meters): ahead, to the left, below eye level.
-        static readonly Vector3 k_Rest = new Vector3(-0.43f, -0.22f, 0.62f); // just outside the catalog's left edge
+        // With the catalog closed: ahead, centered, below eye level (meters, relative to your head).
+        static readonly Vector3 k_Rest = new Vector3(0f, -0.3f, 0.74f);
+        // With the catalog open in front of you: just under the middle of its bottom edge, a little in front of it, a
+        // touch larger so it reads at the panel's distance.
+        const float k_PanelBelow = 0.045f, k_PanelGap = 0.06f, k_PanelScale = 1.15f;
 
         static Sprite s_Core, s_Glow, s_Ring, s_Arc;
 
@@ -160,6 +165,7 @@ namespace VRShop.Assistant
                 var bytes = await app.Api.GetBytes(url, 30);
                 if (token != m_SpeechToken || this == null) return;
                 var clip = WavDecoder.ToClip(bytes, "designer");
+                if (clip == null) { FinishWithoutVoice(token); return; }
                 if (m_Audio.clip != null) Destroy(m_Audio.clip);
                 m_Audio.clip = clip;
                 m_Audio.Play();
@@ -215,11 +221,11 @@ namespace VRShop.Assistant
             if (m_Hint.text.Length > 0) Put(m_Hint, ref y, innerW, 24, 0, 6);
             else m_Hint.gameObject.SetActive(false);
             var h = Mathf.Min(BubbleCanvasH, y + Pad - 6);
-            var top = (BubbleCanvasH - h) / 2;
-            UIKit.Place(m_BubbleBox, 0, top, BubbleW, h);
+            // Hangs from the top: the tail stays level with the orb and longer captions grow downward.
+            UIKit.Place(m_BubbleBox, 0, 0, BubbleW, h);
             UIKit.Place(m_BubbleShadow.rectTransform, -24, -24 + 8, BubbleW + 48, h + 48);
             UIKit.Place(m_BubbleBg.rectTransform, 0, 0, BubbleW, h);
-            UIKit.Place(m_Tail.rectTransform, -9, h / 2 - 9, 18, 18);
+            UIKit.Place(m_Tail.rectTransform, -9, Mathf.Min(TailY, h / 2) - 9, 18, 18);
         }
 
         static void Put(TextMeshProUGUI t, ref float y, float w, float h, float gapAfter, float gapBefore = 0)
@@ -334,7 +340,17 @@ namespace VRShop.Assistant
             if (fwd.sqrMagnitude < 0.01f) fwd = Vector3.forward;
             fwd.Normalize();
             var right = Vector3.Cross(Vector3.up, fwd);
-            var target = head.position + fwd * k_Rest.z + right * k_Rest.x + Vector3.up * k_Rest.y;
+            Vector3 target;
+            var scale = 1f;
+            var panel = CatalogPanel.Instance;
+            if (panel != null && panel.InView)
+            {
+                // Under the main UI: no head turn to find it, and it moves with the panel, not with every glance.
+                target = panel.BottomCenter - panel.transform.up * k_PanelBelow - panel.transform.forward * k_PanelGap;
+                scale = k_PanelScale;
+            }
+            else target = head.position + fwd * k_Rest.z + right * k_Rest.x + Vector3.up * k_Rest.y;
+            transform.localScale = Vector3.one * Mathf.MoveTowards(transform.localScale.x, scale, Time.deltaTime);
 
             // Lazy follow: stay put for small head turns, glide back when you look well away.
             if (!m_Placed) { transform.position = target; m_Placed = true; }
@@ -347,14 +363,18 @@ namespace VRShop.Assistant
             }
 
             // Face the viewer; a gentle float.
-            var face = Quaternion.LookRotation(transform.position - head.position, Vector3.up);
+            var toOrb = transform.position - head.position;
+            var face = toOrb.sqrMagnitude > 1e-4f ? Quaternion.LookRotation(toOrb, Vector3.up) : m_Orb.rotation;
             m_Orb.rotation = face;
             m_Orb.localPosition = Vector3.up * (Mathf.Sin(Time.time * 1.3f) * 0.004f);
-            // The caption sits beside the orb, turned to face you from its own center so it reads flat, not skewed.
+            // The caption hangs beside the orb, its tail level with the orb, turned to face you from its own center so it
+            // reads flat, not skewed.
+            var k = transform.localScale.x;
             var slide = (1 - m_BubbleGroup.alpha) * 0.02f;
-            var edge = m_Orb.position + face * Vector3.right * (0.052f + slide);
-            var center = edge + face * Vector3.right * (BubbleW * BubbleScale / 2);
-            var bubbleFace = Quaternion.LookRotation(center - head.position, Vector3.up);
+            var edge = m_Orb.position + face * Vector3.right * (0.052f * k + slide) + face * Vector3.up * (TailY * BubbleScale * k);
+            var center = edge + face * Vector3.right * (BubbleW * BubbleScale * k / 2);
+            var toBubble = center - head.position;
+            var bubbleFace = toBubble.sqrMagnitude > 1e-4f ? Quaternion.LookRotation(toBubble, Vector3.up) : m_Bubble.rotation;
             m_Bubble.SetPositionAndRotation(edge, bubbleFace);
         }
 
@@ -380,7 +400,7 @@ namespace VRShop.Assistant
         // ================================================================== build
         void BuildOrb()
         {
-            var canvas = UIKit.CreateCanvas("OrbCanvas", new Vector2(OrbPx, OrbPx), OrbScale);
+            var canvas = UIKit.CreateCanvas("OrbCanvas", new Vector2(OrbPx, OrbPx), OrbScale, UIKit.OrderOrb);
             m_Orb = canvas.transform;
             m_Orb.SetParent(transform, false);
             var c = OrbPx / 2;
@@ -405,17 +425,18 @@ namespace VRShop.Assistant
                 var img = rt.gameObject.AddComponent<Image>();
                 img.sprite = sprite;
                 img.raycastTarget = false;
+                UIKit.Overlay(img);
                 return img;
             }
         }
 
         void BuildBubble()
         {
-            var canvas = UIKit.CreateCanvas("BubbleCanvas", new Vector2(BubbleW + 60, BubbleCanvasH), BubbleScale);
+            var canvas = UIKit.CreateCanvas("BubbleCanvas", new Vector2(BubbleW + 60, BubbleCanvasH), BubbleScale, UIKit.OrderOrb + 1);
             m_Bubble = canvas.transform;
             m_Bubble.SetParent(transform, false);
             var rt = (RectTransform)canvas.transform;
-            rt.pivot = new Vector2(0, 0.5f); // left edge sits beside the orb
+            rt.pivot = new Vector2(0, 1); // top-left corner sits beside the orb
             m_BubbleGroup = canvas.gameObject.AddComponent<CanvasGroup>();
             m_BubbleGroup.alpha = 0;
             m_BubbleBox = UIKit.Box(canvas.transform, "Box", 0, 0, BubbleW, 100);
