@@ -1,5 +1,7 @@
 # VRShop — furnish your real room in VR, with real products
 
+[![Watch the VRShop demo](https://img.youtube.com/vi/DlslMQg8jPs/hqdefault.jpg)](https://www.youtube.com/watch?v=DlslMQg8jPs)
+
 Scan your room with your phone → AI understands it and finds **real furniture from real stores** →
 put on a **Meta Quest 2** and place **true-scale 3D models** of those exact products in your actual room,
 walk around them, check they fit, let AI arrange the room, and check out with store links on your phone.
