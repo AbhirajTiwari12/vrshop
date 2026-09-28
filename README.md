@@ -1,16 +1,14 @@
 # VRShop
 
+[![Watch the VRShop demo](assets/vrshop-demo.gif)](https://www.youtube.com/watch?v=DlslMQg8jPs)
+
+[Watch the demo on YouTube →](https://www.youtube.com/watch?v=DlslMQg8jPs)
+
 **Try a new room before you buy it.**
 
 VRShop is a mixed-reality furniture shopping app built for Meta Quest 2. Browse real products, see them in your own space, replace the furniture you already have, and talk to an AI interior designer without taking off your headset.
 
 Built for HackGT.
-
-## Demo
-
-[![Watch the VRShop demo](assets/vrshop-demo.gif)](https://www.youtube.com/watch?v=DlslMQg8jPs)
-
-[Watch the demo on YouTube →](https://www.youtube.com/watch?v=DlslMQg8jPs)
 
 ## What you can do
 
